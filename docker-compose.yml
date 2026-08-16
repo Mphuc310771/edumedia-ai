@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: agentsys_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MEDIA_PROVIDER: memory
+      SEED_DEMO_ITEMS: "true"
+      ENVIRONMENT: development
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-local-dev-key}
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE: ""
+        VITE_API_KEY: ${ADMIN_API_KEY:-local-dev-key}
+    container_name: agentsys_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api

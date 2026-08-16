@@ -1,0 +1,12 @@
+# SAM / Docker build excludes
+gallery_web/node_modules
+gallery_web/dist
+sample_data
+.pytest_cache
+.git
+**/*.pyc
+**/__pycache__
+.venv
+venv
+.htmlcov
+.coverage

@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments & Virtualenv
+.env
+.env.local
+.env.*.local
+.venv/
+env/
+venv/
+ENV/
+
+# Node / Frontend
+node_modules/
+dist/
+gallery_web/node_modules/
+gallery_web/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AWS SAM & Build Artifacts
+.aws-sam/
+samconfig.toml
+
+# Sandbox & Runtime logs
+/tmp/sandbox/
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# OS Specific
+.DS_Store
+Thumbs.db
