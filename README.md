@@ -1,4 +1,4 @@
-# AgentSys: Serverless Multi-Modal Media Search on AWS
+# Serverless Multi-Modal Agent
 
 [![AWS SAM](https://img.shields.io/badge/AWS-SAM%20Serverless-orange?logo=amazon-aws)](https://aws.amazon.com/serverless/sam/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
@@ -7,12 +7,11 @@
 [![Tests](https://img.shields.io/badge/Tests-21%20Passed-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-> **Dự án Thực tập FCAJ (AWS First Cloud AI Journey)**  
-> Hệ thống tìm kiếm và truy vấn Media đa mô thức (Hình ảnh, Âm thanh bài giảng, Video) bằng ngôn ngữ tự nhiên tiếng Việt xây dựng trên nền tảng **AWS Serverless & Amazon Bedrock GenAI**.
+> **Event-driven multimodal media intelligence and semantic retrieval platform built on AWS Serverless and Generative AI.**
 
 ---
 
-## 🏛️ Kiến trúc Hệ thống (Architecture Overview)
+## 🏛️ Architecture Overview
 
 ```mermaid
 flowchart TD
@@ -42,84 +41,81 @@ flowchart TD
 
 ---
 
-## ☁️ 10 Dịch vụ AWS Cốt lõi (Integrated Services)
+## ☁️ Integrated AWS Services
 
-| STT | Dịch vụ AWS | Vai trò trong hệ thống |
-| :---: | :--- | :--- |
-| **1** | **Amazon S3** | Lưu trữ tệp media bảo mật với SSE-S3 encryption, presigned URL và S3 ObjectCreated events. |
-| **2** | **Amazon SQS + DLQ** | Hàng đợi đệm phân tán chống nghẽn; Dead-Letter Queue tự động cô lập tệp lỗi sau 3 lần retry. |
-| **3** | **AWS Lambda** | Điện toán Serverless thực thi `ApiFunction` (FastAPI + Mangum) và `IngestWorkerFunction`. |
-| **4** | **Amazon Rekognition** | Nhận diện vật thể (`DetectLabels`) và bóc toàn bộ chữ viết tay/in ấn (`DetectText` OCR). |
-| **5** | **Amazon Transcribe** | Chuyển đổi giọng nói bài giảng tiếng Việt (`vi-VN`) thành văn bản có dấu. |
-| **6** | **Amazon Bedrock** | GenAI Query Planner chuyển câu hỏi tiếng Việt tự nhiên thành kế hoạch tìm kiếm chính xác. |
-| **7** | **Amazon DynamoDB** | NoSQL Database On-Demand, Global Secondary Index `category-index` tra cứu dưới 10ms. |
-| **8** | **Amazon CloudWatch** | Giám sát toàn diện: Custom Metrics (`MediaIngested`), Logs và 3 chuông cảnh báo Alarms. |
-| **9** | **AWS IAM** | Quản lý bảo mật chuẩn Least-Privilege cho từng hàm Lambda (không dùng Access Key tĩnh). |
-| **10** | **AWS SAM (IaC)** | Đóng gói toàn bộ hạ tầng trong `infra/template.yaml`, triển khai 1-click tự động. |
+| Service | Architecture Role |
+| :--- | :--- |
+| **Amazon S3** | Encrypted private media storage with SSE-S3, Presigned URLs, and ObjectCreated event triggers. |
+| **Amazon SQS + DLQ** | Decoupled event-driven buffer with Dead-Letter Queue isolation after 3 failed retries. |
+| **AWS Lambda** | Serverless compute executing FastAPI REST endpoints (`ApiFunction`) and background worker (`IngestWorkerFunction`). |
+| **Amazon Rekognition** | Computer vision label classification (`DetectLabels`) and OCR text extraction (`DetectText`). |
+| **Amazon Transcribe** | Speech-to-text pipeline transcribing Vietnamese audio lectures (`vi-VN`) into indexed text. |
+| **Amazon Bedrock** | Generative AI query planning (Nova Lite / Claude 3.5 Sonnet) translating natural queries into structured search plans. |
+| **Amazon DynamoDB** | On-demand NoSQL document store with sub-10ms GSI queries (`category-index`). |
+| **Amazon CloudWatch** | End-to-end observability: Custom metric telemetry (`MediaIngested`), structured logs, and automated alarms. |
+| **AWS IAM** | Granular least-privilege role policies scoped per Lambda function (no static credentials). |
+| **AWS SAM** | Infrastructure as Code (IaC) automating multi-service cloud provisioning via declarative templates. |
 
 ---
 
-## 🚀 Hướng dẫn Chạy Thử nghiệm (Local Quickstart)
+## 🚀 Quickstart & Local Testing
 
-### 1. Khởi động nhanh (1-Click Launcher):
-Nhấp đúp chuột vào file `start_app.bat` trên Windows để tự động bật cả Backend, Frontend và mở trình duyệt.
+### 1. Launch Everything (1-Click on Windows):
+Double-click `start_app.bat` to launch the FastAPI backend, React frontend, and open your browser automatically.
 
-### 2. Khởi động thủ công:
+### 2. Manual Start:
 
-**Terminal 1 — Backend API:**
+**Backend API:**
 ```bash
-# Cài đặt thư viện
 pip install -r requirements.txt
-
-# Chạy FastAPI server
 python -m uvicorn apps.api.main:app --port 8000 --reload
 ```
 
-**Terminal 2 — Frontend Gallery UI:**
+**Frontend UI:**
 ```bash
 cd gallery_web
 npm install
 npm run dev
 ```
 
-* **Giao diện Web:** `http://localhost:5174`
-* **Swagger API Docs:** `http://localhost:8000/docs`
-* **Health Check:** `http://localhost:8000/health`
+* **Web Application:** `http://localhost:5174` (or mobile on LAN: `http://<LAN_IP>:5174`)
+* **API Documentation:** `http://localhost:8000/docs`
+* **Health Endpoint:** `http://localhost:8000/health`
 
 ---
 
-## 🧪 Kiểm thử Tự động (Automated Testing)
+## 🧪 Automated Testing & Verification
 
-Chạy bộ kiểm thử 21 test cases toàn diện (Unit tests, Ingest Events, Search & NLP Resilience, SAM Template & Security):
+Run the full test suite (21 unit tests, ingest event simulation, search resilience, and SAM template validation):
 
 ```bash
 pytest tests/ -v
 ```
 
-Kiểm tra hợp lệ trước khi nộp bài:
+Pre-flight compliance check:
 ```bash
 python scripts/verify_local.py
 ```
 
 ---
 
-## 🚢 Triển khai lên AWS (Cloud Deployment)
+## 🚢 Cloud Deployment (AWS SAM)
 
 ```bash
-# 1. Build SAM Application
+# 1. Build serverless artifacts
 sam build -t infra/template.yaml
 
-# 2. Deploy lên AWS
+# 2. Deploy to AWS
 sam deploy --guided --capabilities CAPABILITY_IAM
 ```
 
-Sau khi hoàn tất đánh giá, xóa tài nguyên để tránh phát sinh chi phí:
+Tear down resources after evaluation:
 ```bash
 sam delete --stack-name agentsys
 ```
 
 ---
 
-## 👨‍💻 Tác giả & Đồ án
-* **Sinh viên thực hiện:** Đỗ Trần Minh Phúc (HCMUS)
-* **Chương trình:** First Cloud AI Journey (FCAJ) — AWS Vietnam
+## 👨‍💻 Author & Program
+* **Author:** Đỗ Trần Minh Phúc (HCMUS)
+* **Program:** First Cloud AI Journey (FCAJ) — AWS Vietnam
