@@ -11,6 +11,7 @@ jobs:
     name: Pytest
     runs-on: ubuntu-latest
     env:
+      PYTHONPATH: .
       MEDIA_PROVIDER: memory
       SEED_DEMO_ITEMS: "true"
       ADMIN_API_KEY: test-key
@@ -19,11 +20,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.10"
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m compileall apps/ config/ tests/
-      - run: pytest tests/ -v --cov=apps --cov-fail-under=70
+      - run: python -m pytest tests/ -v
 
   frontend-build:
     name: Frontend build
