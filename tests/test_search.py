@@ -65,3 +65,27 @@ def test_bedrock_plan_json_resilience():
     assert fallback_plan.rationale == "Fallback keyword extraction from query"
     assert "cho" in fallback_plan.keywords or "chu" in fallback_plan.keywords
 
+
+def test_vector_cosine_similarity():
+    from apps.search.vector_engine import cosine_similarity, compute_deterministic_embedding
+
+    v1 = compute_deterministic_embedding("toán cao cấp tích phân")
+    v2 = compute_deterministic_embedding("toán tích phân giải tích")
+    v3 = compute_deterministic_embedding("chú chó lông vàng ngoài sân")
+
+    sim_related = cosine_similarity(v1, v2)
+    sim_unrelated = cosine_similarity(v1, v3)
+
+    assert sim_related > 0.4
+    assert sim_related > sim_unrelated
+
+
+def test_hybrid_vector_semantic_search():
+    from apps.agent.search import execute_search
+
+    # Test abstract semantic query
+    _, hits = execute_search("tài liệu học tập giảng đường")
+    assert hits
+    assert any(h.record.category == "study" for h in hits)
+    assert hits[0].score > 0.0
+

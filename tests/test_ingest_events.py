@@ -95,3 +95,17 @@ def test_handler_reports_batch_failure(monkeypatch):
     result = handler(event, None)
     assert result["ok"] is False
     assert result["batchItemFailures"] == [{"itemIdentifier": "bad-1"}]
+
+
+def test_handler_eventbridge_transcribe_completion():
+    event = {
+        "source": "aws.transcribe",
+        "detail-type": "Transcribe Job State Change",
+        "detail": {
+            "TranscriptionJobName": "agentsys-uploads-seed-lecture-audio.mp3",
+            "TranscriptionJobStatus": "COMPLETED",
+        },
+    }
+    result = handler(event, None)
+    assert result["ok"] is True
+    assert result.get("source") == "EventBridge"

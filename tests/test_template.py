@@ -28,6 +28,9 @@ def test_template_uses_least_privilege_and_required_services():
     assert "ApproximateNumberOfMessagesVisible" in text
     assert "ReservedConcurrentExecutions: 2" in text
     assert "SSEEnabled: true" in text
+    assert "TranscribeStateChange" in text
+    assert "EventBridgeRule" in text
+    assert "aws.transcribe" in text
 
 
 def test_no_legacy_local_stack_files():

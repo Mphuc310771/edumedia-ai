@@ -208,8 +208,8 @@ class TranscribeSpeech:
         self.client = _client("transcribe")
         self.bucket = settings.MEDIA_BUCKET
 
-    def transcribe(self, object_key: str, media_format: str) -> str:
-        # AWS Transcribe TranscriptionJobName regex constraint: ^[0-9a-zA-Z._-]+$
+    def start_job(self, object_key: str, media_format: str) -> str:
+        """Non-blocking: Dispatches asynchronous transcription job for EventBridge event handling."""
         raw_name = object_key.replace("/", "-")
         safe_name = re.sub(r"[^0-9a-zA-Z._-]", "_", raw_name)
         job_name = f"agentsys-{safe_name}"[:200]
@@ -229,6 +229,12 @@ class TranscribeSpeech:
             if code not in {"ConflictException", "Conflict"}:
                 raise
             logger.info("Reuse existing Transcribe job %s", job_name)
+        return job_name
+
+    def transcribe(self, object_key: str, media_format: str) -> str:
+        # AWS Transcribe TranscriptionJobName regex constraint: ^[0-9a-zA-Z._-]+$
+        job_name = self.start_job(object_key, media_format)
+        output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
 
         deadline = time.time() + settings.TRANSCRIBE_MAX_WAIT_SECONDS
         while time.time() < deadline:
@@ -242,6 +248,20 @@ class TranscribeSpeech:
                 raise RuntimeError(f"Transcribe failed: {reason}")
             time.sleep(settings.TRANSCRIBE_POLL_SECONDS)
         raise TimeoutError(f"Transcribe job {job_name} exceeded wait budget")
+
+
+class TitanEmbeddings:
+    """Amazon Titan Multimodal Embeddings (amazon.titan-embed-text-v1)."""
+
+    def __init__(self):
+        region = settings.BEDROCK_REGION or settings.AWS_REGION
+        self.client = _client("bedrock-runtime", region=region)
+        self.model_id = "amazon.titan-embed-text-v1"
+
+    def embed_text(self, text: str) -> List[float]:
+        from apps.search.vector_engine import get_titan_embedding
+
+        return get_titan_embedding(text, bedrock_client=self.client)
 
 
 def _read_transcript(uri: str, output_key: str) -> str:

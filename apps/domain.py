@@ -38,6 +38,7 @@ class MediaRecord(BaseModel):
     size_bytes: int = 0
     preview_url: Optional[str] = None
     source: str = "pipeline"
+    embedding: Optional[List[float]] = None
 
     @field_validator("size_bytes", mode="before")
     @classmethod
@@ -52,6 +53,7 @@ class SearchPlan(BaseModel):
     media_type: Optional[MediaType] = None
     category: Optional[SmartCategory] = None
     rationale: str = ""
+    vector_query: Optional[List[float]] = None
 
     @field_validator("media_type", "category", mode="before")
     @classmethod
@@ -64,6 +66,7 @@ class SearchPlan(BaseModel):
 class SearchHit(BaseModel):
     record: MediaRecord
     score: float
+    vector_score: float = 0.0
     matched_on: List[str] = Field(default_factory=list)
     matched_fields: List[str] = Field(default_factory=list)
 

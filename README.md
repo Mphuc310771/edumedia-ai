@@ -4,10 +4,10 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev/)
-[![Tests](https://img.shields.io/badge/Tests-21%20Passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-25%20Passed-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-> **Event-driven multimodal media intelligence and semantic retrieval platform built on AWS Serverless and Generative AI.**
+> **Event-driven multimodal media intelligence and semantic retrieval platform built on AWS Serverless, Amazon Bedrock Generative AI, and Vector Embeddings.**
 
 ---
 
@@ -16,7 +16,7 @@
 ```mermaid
 flowchart TD
     Client([📱 Client Web / Mobile]):::client -->|Presigned PUT / REST API| S3[(Amazon S3 Private Media Bucket)]:::aws
-    Client <-->|REST API| APIGW[Amazon API Gateway HTTP API]:::aws
+    Client <-->|REST API / Cognito Auth| APIGW[Amazon API Gateway HTTP API]:::aws
     APIGW <--> LambdaAPI[AWS Lambda FastAPI API]:::aws
     
     S3 -->|s3:ObjectCreated Notification| SQS[Amazon SQS Ingest Queue]:::aws
@@ -24,12 +24,16 @@ flowchart TD
     SQS --> LambdaWorker[AWS Lambda Ingest Worker]:::aws
     
     LambdaWorker -->|Image| Rekognition[Amazon Rekognition: DetectLabels + OCR Text]:::ai
-    LambdaWorker -->|Audio / Video| Transcribe[Amazon Transcribe: vi-VN Speech-to-Text]:::ai
+    LambdaWorker -->|Audio / Video Async| Transcribe[Amazon Transcribe: vi-VN Speech-to-Text]:::ai
+    
+    Transcribe -.->|Job State Change Event| EventBridge[Amazon EventBridge Rule]:::aws
+    EventBridge -.->|Trigger Completion Callback| LambdaWorker
     
     Rekognition --> DynamoDB[(Amazon DynamoDB GSI category-index)]:::aws
     Transcribe --> DynamoDB
     
-    LambdaAPI <-->|Query Planning| Bedrock[Amazon Bedrock: Nova Lite / Claude 3.5]:::ai
+    LambdaAPI <-->|Titan Multimodal Embeddings & Cosine Search| TitanEmbed[Amazon Titan Vector Embeddings]:::ai
+    LambdaAPI <-->|Query Planning: Nova Lite / Claude 3.5| Bedrock[Amazon Bedrock Agent]:::ai
     LambdaAPI <--> DynamoDB
     
     LambdaWorker --> CloudWatch[Amazon CloudWatch Metrics & Alarms]:::aws

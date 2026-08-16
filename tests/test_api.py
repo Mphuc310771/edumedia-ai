@@ -88,3 +88,10 @@ def test_upload_batch_multiple_files(client, auth_headers):
     assert len(data) == 2
     assert data[0]["filename"] == "batch-1.jpg"
     assert data[1]["filename"] == "batch-2.jpg"
+
+
+def test_cognito_bearer_token_auth(client):
+    # Test Cognito Bearer Token authentication
+    headers = {"Authorization": "Bearer cognito-mock-access-token-fcaj"}
+    response = client.get("/api/v1/media/items", headers=headers)
+    assert response.status_code == 200
