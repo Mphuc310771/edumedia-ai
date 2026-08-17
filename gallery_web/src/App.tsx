@@ -95,14 +95,16 @@ export default function App() {
         const currentIndex = ++fileIndex
         const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
         setCurrentProcessingFile(file.name)
-        addLog(`📦 [${currentIndex}/${files.length}] Uploading: ${file.name} (${sizeMb} MB) -> S3...`, "info")
+        const isAudioOrVideo = file.type.startsWith("audio/") || file.type.startsWith("video/") || file.name.endsWith(".m4a") || file.name.endsWith(".mp3")
+        const actionLabel = isAudioOrVideo ? "Đang tải lên & Bóc băng giọng nói AI" : "Đang tải lên S3 & Quét nhãn AI"
+        addLog(`📦 [${currentIndex}/${files.length}] ${actionLabel}: ${file.name} (${sizeMb} MB)...`, "info")
         try {
           const item = await uploadMedia(file)
           successCount++
           completed++
           setCompletedUploadFiles(completed)
-          const labelsStr = item.labels && item.labels.length > 0 ? ` (${item.labels.slice(0, 2).join(", ")})` : ""
-          addLog(`✅ [${currentIndex}/${files.length}] S3 & Rekognition: ${file.name} [${item.category}]${labelsStr}`, "success")
+          const labelsStr = item.labels && item.labels.length > 0 ? ` [${item.labels.slice(0, 3).join(", ")}]` : ""
+          addLog(`✅ [${currentIndex}/${files.length}] Hoàn tất: ${file.name}${labelsStr}`, "success")
           if (completed % 2 === 0 || completed === files.length) {
             void reload()
           }

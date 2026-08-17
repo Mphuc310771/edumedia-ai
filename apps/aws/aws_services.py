@@ -236,7 +236,13 @@ def _local_speech_transcribe(s3_client, bucket: str, object_key: str, media_form
                 tmp_path = tmp.name
 
             try:
-                segments, info = model.transcribe(tmp_path, language="vi", beam_size=5, vad_filter=True)
+                segments, info = model.transcribe(
+                    tmp_path,
+                    language="vi",
+                    beam_size=1,
+                    vad_filter=True,
+                    temperature=0.0,
+                )
                 chunks = [s.text.strip() for s in segments if s.text.strip()]
                 if chunks:
                     return " ".join(chunks)
