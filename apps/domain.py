@@ -142,6 +142,8 @@ CATEGORY_KEYWORDS: dict[SmartCategory, tuple[tuple[str, int], ...]] = {
 def infer_category(media_type: MediaType, labels: List[str], text: str) -> SmartCategory:
     if media_type == "video":
         return "videos"
+    if media_type == "audio":
+        return "study"
 
     blob = " ".join([*labels, text]).lower()
     folded_blob = fold_text(blob)

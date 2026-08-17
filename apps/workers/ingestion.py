@@ -82,11 +82,24 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
 
 
 def _build_summary(record: MediaRecord) -> str:
+    if record.media_type == "audio":
+        ext = os.path.splitext(record.filename)[1].upper().replace(".", "")
+        size_str = f"{record.size_bytes / (1024 * 1024):.1f} MB" if record.size_bytes > 0 else ""
+        if record.transcript and not record.transcript.startswith("Bản ghi đa phương tiện"):
+            return f"Bản ghi âm thanh ({ext}, {size_str}): \"{record.transcript[:140]}...\""
+        return f"File ghi âm giọng nói {ext} ({size_str}) đã lưu trữ an toàn trên Amazon S3 và lập chỉ mục trong Amazon DynamoDB."
+
+    if record.media_type == "video":
+        ext = os.path.splitext(record.filename)[1].upper().replace(".", "")
+        size_str = f"{record.size_bytes / (1024 * 1024):.1f} MB" if record.size_bytes > 0 else ""
+        return f"Video đa phương tiện {ext} ({size_str}) được lập chỉ mục trong danh mục Video & Kỷ niệm."
+
     if record.ocr_text:
-        first = record.ocr_text.strip().splitlines()[0][:180]
-        return f"OCR: {first}"
-    if record.transcript:
-        return f"Transcript: {record.transcript[:180]}"
+        first = record.ocr_text.strip().replace("\n", " ")[:150]
+        labels_preview = f" (Nhận diện: {', '.join(record.labels[:4])})" if record.labels else ""
+        return f"Văn bản OCR: \"{first}\"{labels_preview}"
+
     if record.labels:
-        return f"Labels: {', '.join(record.labels[:8])}"
-    return f"Indexed file {record.filename}"
+        return f"Ảnh được Amazon Rekognition nhận diện đặc trưng: {', '.join(record.labels[:6])}."
+
+    return f"Tài liệu {record.filename} đã được lập chỉ mục thành công."

@@ -7,6 +7,7 @@ import sys
 
 from apps.aws.providers import get_runtime
 from apps.domain import infer_category
+from apps.workers.ingestion import _build_summary
 
 def run():
     runtime = get_runtime()
@@ -32,15 +33,15 @@ def run():
             runtime.catalog.delete(dup.file_id)
             deleted_count += 1
 
-        # Re-classify category for keeper
+        # Re-classify category and summary for keeper
         old_cat = keeper.category
         new_cat = infer_category(keeper.media_type, keeper.labels, f"{keeper.ocr_text} {keeper.transcript} {keeper.filename}")
-        if old_cat != new_cat or duplicates:
-            keeper.category = new_cat
-            runtime.catalog.put(keeper)
-            updated_count += 1
-            safe_fn = filename.encode("ascii", "replace").decode("ascii")
-            print(f"  [OK] {safe_fn} -> Category: {old_cat} => {new_cat}")
+        keeper.category = new_cat
+        keeper.summary = _build_summary(keeper)
+        runtime.catalog.put(keeper)
+        updated_count += 1
+        safe_fn = filename.encode("ascii", "replace").decode("ascii")
+        print(f"  [OK] {safe_fn} -> Category: {old_cat} => {new_cat}")
 
     remaining = runtime.catalog.list_all()
     print("==================================================")
