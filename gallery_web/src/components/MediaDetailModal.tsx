@@ -265,7 +265,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
               <div className="space-y-3 animate-fade-in">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-slate-400 font-mono">Bản dịch giọng nói (vi-VN):</span>
-                  {item.transcript && (
+                  {item.transcript && !item.transcript.startsWith("Bản ghi đa phương tiện") && (
                     <button
                       onClick={() => handleCopy(item.transcript)}
                       className="text-[11px] text-indigo-400 flex items-center gap-1 hover:text-indigo-300"
@@ -275,13 +275,22 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
                     </button>
                   )}
                 </div>
-                {item.transcript ? (
+                {item.transcript && !item.transcript.startsWith("Bản ghi đa phương tiện") ? (
                   <div className="p-3 rounded-xl bg-indigo-950/20 border border-indigo-500/20 text-slate-200 text-xs leading-relaxed max-h-56 overflow-y-auto">
                     "{item.transcript}"
                   </div>
                 ) : (
-                  <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-slate-500 text-xs font-mono">
-                    Không có bản ghi âm / transcript cho tệp này.
+                  <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/20 text-slate-300 text-xs space-y-2">
+                    <div className="flex items-center gap-2 text-indigo-300 font-semibold text-xs">
+                      <Mic className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span>Amazon Transcribe (vi-VN) - Tác vụ Bất đồng bộ</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      Tệp âm thanh dài <strong>{item.size}</strong> đã được lưu trữ an toàn trên Amazon S3 và có thể nghe trực tiếp trên trình phát âm thanh bên trái.
+                    </p>
+                    <div className="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] text-amber-300/90 leading-relaxed">
+                      💡 <strong>Lưu ý:</strong> Dịch vụ Amazon Transcribe trên tài khoản AWS mới cần mở trang <a href="https://console.aws.amazon.com/transcribe" target="_blank" rel="noreferrer" className="underline text-indigo-300">console.aws.amazon.com/transcribe</a> một lần để kích hoạt quyền bóc băng giọng nói.
+                    </div>
                   </div>
                 )}
               </div>
