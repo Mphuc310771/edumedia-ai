@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { CheckCircle2, Loader2, X, ChevronUp, ChevronDown, Sparkles } from "lucide-react"
+import { CheckCircle2, Loader2, X, ChevronUp, ChevronDown } from "lucide-react"
 
 export interface ConsoleLog {
   id: string
@@ -23,8 +23,6 @@ interface ProcessingConsoleProps {
 
 export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({
   isOpen,
-  isMinimized,
-  onToggleMinimize,
   onClose,
   totalFiles,
   completedFiles,
@@ -41,55 +39,75 @@ export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({
     }
   }, [logs])
 
+  // Auto-close 5s after 100% completion
+  useEffect(() => {
+    if (totalFiles > 0 && completedFiles >= totalFiles) {
+      const timer = setTimeout(() => {
+        onClose()
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [completedFiles, totalFiles, onClose])
+
   if (!isOpen) return null
 
   const progressPercent = totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : 0
   const isFinished = totalFiles > 0 && completedFiles >= totalFiles
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 animate-fade-in max-w-md w-full px-2 sm:px-0">
-      <div className="bg-slate-950/95 border border-white/15 rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden flex flex-col">
+    <div
+      style={{
+        position: "fixed",
+        bottom: "24px",
+        right: "24px",
+        top: "auto",
+        left: "auto",
+        zIndex: 9999,
+      }}
+      className="animate-fade-in max-w-sm w-[380px] pointer-events-auto select-none"
+    >
+      <div className="bg-slate-950/95 border border-white/20 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl overflow-hidden flex flex-col">
         {/* Compact Floating Status Header (Default View) */}
-        <div className="p-3.5 flex items-center justify-between gap-3 bg-white/[0.02]">
+        <div className="p-3 flex items-center justify-between gap-2.5 bg-white/[0.03]">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {isFinished ? (
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               </div>
             ) : (
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
                 <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
               </div>
             )}
 
             <div className="flex flex-col min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-white truncate">
-                  {isFinished ? "Hoàn tất xử lý dữ liệu" : `Đang tải lên AWS (${completedFiles}/${totalFiles})`}
+                  {isFinished ? "Đã tải lên hoàn tất" : `Đang tải lên AWS (${completedFiles}/${totalFiles})`}
                 </span>
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 shrink-0">
                   {progressPercent}%
                 </span>
               </div>
-              <span className="text-[11px] text-slate-400 truncate">
-                {isFinished ? "Toàn bộ tệp đã sẵn sàng trong kho" : currentFileName || "Đang truyền tải dữ liệu..."}
+              <span className="text-[10px] text-slate-400 truncate">
+                {isFinished ? "Tất cả tệp đã sẵn sàng trong kho" : currentFileName || "Đang truyền tải dữ liệu..."}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
             <button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="px-2 py-1 rounded-lg text-[11px] font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1"
+              className="px-2 py-1 rounded-md text-[10px] font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1"
             >
               <span>{isExpanded ? "Thu gọn" : "Nhật ký"}</span>
-              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
             </button>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -106,11 +124,11 @@ export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({
         {isExpanded && (
           <div
             ref={logContainerRef}
-            className="p-3 overflow-y-auto space-y-1.5 font-mono text-[11px] max-h-48 bg-black/60 border-t border-white/5 scrollbar-thin"
+            className="p-3 overflow-y-auto space-y-1.5 font-mono text-[10px] max-h-40 bg-black/70 border-t border-white/10 scrollbar-thin"
           >
             {logs.map((log) => (
-              <div key={log.id} className="flex items-start gap-2 leading-relaxed text-slate-300">
-                <span className="text-slate-500 text-[10px] shrink-0">{log.timestamp}</span>
+              <div key={log.id} className="flex items-start gap-1.5 leading-relaxed text-slate-300">
+                <span className="text-slate-500 text-[9px] shrink-0">{log.timestamp}</span>
                 <span
                   className={`text-[9px] px-1 py-0.2 rounded font-bold shrink-0 ${
                     log.type === "success"
