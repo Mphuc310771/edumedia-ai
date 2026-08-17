@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { X, Sparkles, Eye, Mic, Server, Copy, Check, Trash2 } from "lucide-react"
+import { X, Sparkles, Copy, Check, Trash2, Cloud, FileText, Mic } from "lucide-react"
 import { MediaItem } from "../types"
 
 interface MediaDetailModalProps {
@@ -8,10 +8,8 @@ interface MediaDetailModalProps {
   onDelete?: (fileId: string) => Promise<void>
 }
 
-type TabType = "summary" | "vision" | "speech" | "aws"
-
 export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClose, onDelete }) => {
-  const [activeTab, setActiveTab] = useState<TabType>("summary")
+  const [activeTab, setActiveTab] = useState<"content" | "tech">("content")
   const [copied, setCopied] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -33,44 +31,46 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
     }
   }
 
+  const hasTranscript = Boolean(item.transcript && !item.transcript.startsWith("Bản ghi đa phương tiện"))
+  const hasOcr = Boolean(item.ocrText && item.ocrText.trim().length > 0)
+
   return (
     <div className="modal-overlay animate-fade-in" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-        {/* Close & Delete Buttons */}
+        {/* Top Control Buttons */}
         <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5">
           {onDelete && (
             <button
               onClick={() => void handleDelete()}
               disabled={deleting}
-              aria-label="Xóa tệp"
               title="Xóa tệp này"
-              className="w-8 h-8 rounded-full bg-black/70 hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/40 border border-white/10 text-slate-400 flex items-center justify-center transition-colors"
+              className="w-8 h-8 rounded-full bg-black/60 hover:bg-rose-500/20 hover:text-rose-400 border border-white/10 text-slate-400 flex items-center justify-center transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
           <button
             onClick={onClose}
-            aria-label="Đóng"
-            className="w-8 h-8 rounded-full bg-black/70 hover:bg-white/20 border border-white/10 text-white flex items-center justify-center transition-colors"
+            title="Đóng"
+            className="w-8 h-8 rounded-full bg-black/60 hover:bg-white/20 border border-white/10 text-white flex items-center justify-center transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Left Column: Media Preview */}
-        <div className="modal-media-col">
+        {/* Left Column: Media Player / Preview */}
+        <div className="modal-media-col bg-slate-950">
           {item.type === "image" && (
             <>
               {item.url ? (
                 <img
                   src={item.url}
                   alt={item.filename}
-                  className="rounded-xl shadow-2xl"
+                  className="rounded-xl max-h-[75vh] object-contain shadow-2xl"
                 />
               ) : (
-                <div className="text-center p-8 text-slate-500 font-mono text-xs">
-                  Không có ảnh xem trước
+                <div className="text-center p-8 text-slate-500 text-xs">
+                  Không có hình ảnh xem trước
                 </div>
               )}
             </>
@@ -84,10 +84,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
                   autoPlay
                   src={item.url}
                   poster={item.thumbnailUrl}
-                  className="rounded-xl shadow-2xl"
+                  className="rounded-xl shadow-2xl max-h-[75vh]"
                 />
               ) : (
-                <div className="text-center p-8 text-slate-500 font-mono text-xs">
+                <div className="text-center p-8 text-slate-500 text-xs">
                   Video không khả dụng
                 </div>
               )}
@@ -96,11 +96,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
 
           {item.type === "audio" && (
             <div className="p-6 text-center w-full max-w-sm">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mx-auto mb-4 shadow-xl">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto mb-4 shadow-inner">
                 <Mic className="w-8 h-8" />
               </div>
-              <h4 className="font-bold text-sm text-slate-100 mb-1 truncate">{item.filename}</h4>
-              <p className="text-[11px] text-indigo-300 font-mono mb-4">Amazon Transcribe (vi-VN)</p>
+              <h4 className="font-semibold text-sm text-slate-100 mb-1 truncate">{item.filename}</h4>
+              <p className="text-xs text-slate-400 mb-4 font-mono">{item.size}</p>
 
               {item.url && (
                 <audio
@@ -113,203 +113,149 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({ item, onClos
           )}
         </div>
 
-        {/* Right Column: AI Metadata Inspector */}
-        <div className="modal-info-col">
-          {/* Header Info */}
+        {/* Right Column: Information Panel */}
+        <div className="modal-info-col bg-slate-900/90 flex flex-col justify-between">
+          {/* Header */}
           <div className="p-4 border-b border-white/10 bg-slate-950/40">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
                 {item.categoryLabel || item.category}
               </span>
               <span className="text-xs text-slate-500">•</span>
               <span className="text-xs text-slate-400 font-mono">{item.size}</span>
             </div>
-            <h3 className="font-mono text-sm font-bold text-white truncate" title={item.filename}>
+            <h3 className="text-sm font-bold text-white truncate" title={item.filename}>
               {item.filename}
             </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
-              {item.date} • Trạng thái: <span className="text-emerald-400 font-semibold">{item.status}</span>
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Ngày tải lên: {item.date}
             </p>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="modal-tab-bar">
+          {/* Simple Tab Bar */}
+          <div className="flex border-b border-white/10 px-4 bg-white/[0.02]">
             <button
-              onClick={() => setActiveTab("summary")}
-              className={`modal-tab-btn ${activeTab === "summary" ? "active" : ""}`}
+              onClick={() => setActiveTab("content")}
+              className={`py-2.5 px-3 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${
+                activeTab === "content"
+                  ? "border-emerald-400 text-emerald-300"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Tổng quan
+              Thông tin & Nội dung
             </button>
             <button
-              onClick={() => setActiveTab("vision")}
-              className={`modal-tab-btn ${activeTab === "vision" ? "active" : ""}`}
+              onClick={() => setActiveTab("tech")}
+              className={`py-2.5 px-3 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${
+                activeTab === "tech"
+                  ? "border-emerald-400 text-emerald-300"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
             >
-              <Eye className="w-3.5 h-3.5" />
-              Rekognition
-            </button>
-            <button
-              onClick={() => setActiveTab("speech")}
-              className={`modal-tab-btn ${activeTab === "speech" ? "active" : ""}`}
-            >
-              <Mic className="w-3.5 h-3.5" />
-              Transcribe
-            </button>
-            <button
-              onClick={() => setActiveTab("aws")}
-              className={`modal-tab-btn ${activeTab === "aws" ? "active" : ""}`}
-            >
-              <Server className="w-3.5 h-3.5" />
-              AWS Data
+              <Cloud className="w-3.5 h-3.5" />
+              Thông số đám mây
             </button>
           </div>
 
-          {/* Tab Content Body */}
-          <div className="modal-scroll-body space-y-3">
-            {activeTab === "summary" && (
-              <div className="space-y-3 animate-fade-in">
-                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1">
+          {/* Tab Body */}
+          <div className="p-4 overflow-y-auto space-y-4 flex-1 max-h-[60vh]">
+            {activeTab === "content" && (
+              <div className="space-y-4 animate-fade-in">
+                {/* AI Summary Box */}
+                <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 mb-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    Tóm tắt AI
+                    Tóm tắt nội dung
                   </span>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    {item.summary || "Đã phân tích và trích xuất đặc trưng đa phương thức."}
+                    {item.summary || "Tài liệu đã được lưu trữ và lập chỉ mục tìm kiếm."}
                   </p>
                 </div>
 
-                <div>
-                  <span className="text-xs font-bold text-slate-400 block mb-1.5 font-mono">Pipeline Ingest:</span>
-                  <ol className="space-y-1">
-                    {(item.pipeline && item.pipeline.length > 0
-                      ? item.pipeline
-                      : ["S3 PutObject", "DynamoDB PutItem"]
-                    ).map((step, index) => (
-                      <li key={step} className="flex items-center gap-2 text-xs text-slate-300">
-                        <span className="w-4 h-4 rounded bg-white/10 flex items-center justify-center font-mono text-[10px] text-emerald-400">
-                          {index + 1}
-                        </span>
-                        {step}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
+                {/* Speech Transcript Section (If Audio) */}
+                {item.type === "audio" && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-bold text-slate-300">Nội dung lời thoại:</span>
+                      {hasTranscript && (
+                        <button
+                          onClick={() => handleCopy(item.transcript)}
+                          className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                        >
+                          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          <span>{copied ? "Đã chép" : "Sao chép"}</span>
+                        </button>
+                      )}
+                    </div>
+                    {hasTranscript ? (
+                      <div className="p-3 rounded-xl bg-slate-950 border border-white/10 text-slate-200 text-xs leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap">
+                        {item.transcript}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-slate-950/60 border border-white/5 text-slate-400 text-xs leading-relaxed">
+                        Đoạn ghi âm dài {item.size}. Bấm phát âm thanh bên trái để nghe trực tiếp.
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                <div>
-                  <span className="text-xs font-bold text-slate-400 block mb-1.5 font-mono">Thẻ nhận diện (Tags):</span>
-                  <div className="flex flex-wrap gap-1">
-                    {item.tags && item.tags.length > 0 ? (
-                      item.tags.map((tag) => (
+                {/* OCR Text Section (If Image with text) */}
+                {item.type === "image" && hasOcr && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-bold text-slate-300">Văn bản đọc được (OCR):</span>
+                      <button
+                        onClick={() => handleCopy(item.ocrText)}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                      >
+                        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        <span>{copied ? "Đã chép" : "Sao chép"}</span>
+                      </button>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950 border border-white/10 text-slate-200 text-xs leading-relaxed max-h-40 overflow-y-auto whitespace-pre-wrap font-mono">
+                      {item.ocrText}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tags */}
+                {item.tags && item.tags.length > 0 && (
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 block mb-1.5">Đặc trưng nhận diện:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {item.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-medium"
+                          className="text-[11px] px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-300 font-medium"
                         >
                           #{tag}
                         </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-slate-500">Chưa có tag</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "vision" && (
-              <div className="space-y-3 animate-fade-in">
-                <div>
-                  <span className="text-xs font-bold text-slate-400 block mb-1.5 font-mono">Rekognition Labels:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {item.labels && item.labels.length > 0 ? (
-                      item.labels.map((label) => (
-                        <span
-                          key={label}
-                          className="text-[11px] px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 font-mono"
-                        >
-                          {label}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-slate-500 font-mono">Không có label hình ảnh</span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-slate-400 font-mono">Văn bản trích xuất OCR:</span>
-                    {item.ocrText && (
-                      <button
-                        onClick={() => handleCopy(item.ocrText)}
-                        className="text-[11px] text-cyan-400 flex items-center gap-1 hover:text-cyan-300"
-                      >
-                        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        <span>{copied ? "Đã chép" : "Sao chép"}</span>
-                      </button>
-                    )}
-                  </div>
-                  {item.ocrText ? (
-                    <pre className="p-3 rounded-xl bg-black/60 border border-white/10 text-slate-200 text-xs font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
-                      {item.ocrText}
-                    </pre>
-                  ) : (
-                    <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-slate-500 text-xs font-mono">
-                      Không phát hiện văn bản trong tệp này.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeTab === "speech" && (
-              <div className="space-y-3 animate-fade-in">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-slate-400 font-mono">Bản dịch giọng nói (vi-VN):</span>
-                  {item.transcript && !item.transcript.startsWith("Bản ghi đa phương tiện") && (
-                    <button
-                      onClick={() => handleCopy(item.transcript)}
-                      className="text-[11px] text-indigo-400 flex items-center gap-1 hover:text-indigo-300"
-                    >
-                      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      <span>{copied ? "Đã chép" : "Sao chép"}</span>
-                    </button>
-                  )}
-                </div>
-                {item.transcript && !item.transcript.startsWith("Bản ghi đa phương tiện") ? (
-                  <div className="p-3 rounded-xl bg-indigo-950/20 border border-indigo-500/20 text-slate-200 text-xs leading-relaxed max-h-56 overflow-y-auto">
-                    "{item.transcript}"
-                  </div>
-                ) : (
-                  <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/20 text-slate-300 text-xs space-y-2">
-                    <div className="flex items-center gap-2 text-indigo-300 font-semibold text-xs">
-                      <Mic className="w-4 h-4 text-indigo-400 shrink-0" />
-                      <span>Amazon Transcribe (vi-VN) - Tác vụ Bất đồng bộ</span>
-                    </div>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Tệp âm thanh dài <strong>{item.size}</strong> đã được lưu trữ an toàn trên Amazon S3 và có thể nghe trực tiếp trên trình phát âm thanh bên trái.
-                    </p>
-                    <div className="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] text-amber-300/90 leading-relaxed">
-                      💡 <strong>Lưu ý:</strong> Dịch vụ Amazon Transcribe trên tài khoản AWS mới cần mở trang <a href="https://console.aws.amazon.com/transcribe" target="_blank" rel="noreferrer" className="underline text-indigo-300">console.aws.amazon.com/transcribe</a> một lần để kích hoạt quyền bóc băng giọng nói.
+                      ))}
                     </div>
                   </div>
                 )}
               </div>
             )}
 
-            {activeTab === "aws" && (
+            {activeTab === "tech" && (
               <div className="space-y-3 animate-fade-in text-xs font-mono">
-                <div className="p-3 rounded-xl bg-black/60 border border-white/10 space-y-2">
+                <div className="p-3 rounded-xl bg-slate-950 border border-white/10 space-y-2.5">
                   <div>
-                    <span className="text-slate-500 block text-[10px]">FILE ID (PK DynamoDB)</span>
-                    <span className="text-emerald-400 text-xs">{item.id}</span>
+                    <span className="text-slate-500 block text-[10px]">ĐỊNH DANH (ID DYNAMODB)</span>
+                    <span className="text-emerald-400 text-xs break-all">{item.id}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[10px]">CATEGORY (GSI HASH)</span>
-                    <span className="text-cyan-400 text-xs">{item.category}</span>
+                    <span className="text-slate-500 block text-[10px]">ĐƯỜNG DẪN CLOUD (S3 KEY)</span>
+                    <span className="text-slate-300 text-xs break-all">{item.url ? item.url.split("?")[0] : "uploads/" + item.filename}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[10px]">MEDIA TYPE</span>
-                    <span className="text-indigo-400 text-xs">{item.type}</span>
+                    <span className="text-slate-500 block text-[10px]">KHU VỰC ĐÁM MÂY</span>
+                    <span className="text-slate-300 text-xs">AWS US-EAST-1 (N. Virginia)</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">TRẠNG THÁI LẬP CHỈ MỤC</span>
+                    <span className="text-emerald-400 text-xs font-bold">HOÀN TẤT (READY)</span>
                   </div>
                 </div>
               </div>

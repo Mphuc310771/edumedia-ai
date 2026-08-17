@@ -15,6 +15,7 @@ AUDIO_FORMATS = {".mp3": "mp3", ".wav": "wav", ".m4a": "mp4", ".flac": "flac"}
 VIDEO_FORMATS = {".mp4": "mp4", ".mov": "mp4"}
 
 LABEL_TRANSLATIONS = {
+    # Technology / Study
     "computer": "Máy tính",
     "laptop": "Laptop",
     "electronics": "Thiết bị điện tử",
@@ -23,51 +24,118 @@ LABEL_TRANSLATIONS = {
     "screen": "Màn hình hiển thị",
     "desk": "Bàn làm việc",
     "keyboard": "Bàn phím",
+    "computer hardware": "Phần cứng",
+    "hardware": "Thiết bị",
     "shelf": "Kệ sách",
     "bookcase": "Giá sách",
-    "person": "Người",
+    "book": "Sách vở",
+    "furniture": "Nội thất",
+    "table": "Bàn",
+    "study": "Học tập",
+    # People
+    "person": "Con người",
     "human": "Con người",
-    "face": "Gương mặt",
+    "people": "Mọi người",
+    "face": "Khuôn mặt",
     "head": "Khuôn mặt",
     "portrait": "Chân dung",
+    "adult": "Người lớn",
+    "male": "Nam giới",
+    "female": "Nữ giới",
     "athlete": "Vận động viên",
     "player": "Cầu thủ",
     "soccer": "Bóng đá",
+    "team": "Đội nhóm",
+    "crowd": "Đám đông",
+    # Animals / Pets
     "animal": "Động vật",
     "pet": "Thú cưng",
     "dog": "Chó",
     "cat": "Mèo",
+    "mammal": "Động vật có vú",
     "tiger": "Hổ",
     "lion": "Sư tử",
     "bird": "Chim",
     "fish": "Cá",
-    "landscape": "Phong cảnh",
+    "wildlife": "Động vật hoang dã",
+    # Nature / Scenes
     "nature": "Thiên nhiên",
+    "landscape": "Cảnh quan",
+    "plant": "Cây cối",
+    "tree": "Cây xanh",
+    "vegetation": "Thảm thực vật",
+    "land": "Cảnh vật",
+    "outdoors": "Ngoài trời",
     "beach": "Bãi biển",
     "mountain": "Núi non",
     "sunset": "Hoàng hôn",
-    "city": "Đô thị",
+    "sunrise": "Bình minh",
+    "sky": "Bầu trời",
+    "cloud": "Mây trời",
+    "sea": "Biển cả",
+    "water": "Mặt nước",
     "building": "Tòa nhà",
+    "city": "Đô thị",
     "street": "Đường phố",
+    "road": "Đường đi",
+    "intersection": "Ngã tư",
+    "flower": "Hoa tươi",
+    "flower arrangement": "Bình hoa",
+    "transportation": "Phương tiện",
+    "vehicle": "Xe cộ",
+    "car": "Ô tô",
+    "boat": "Thuyền bè",
+    # Food / Drink
     "food": "Món ăn",
+    "meal": "Bữa ăn",
+    "dish": "Đĩa ăn",
+    "lunch": "Bữa ăn",
+    "dinner": "Bữa ăn",
     "drink": "Đồ uống",
+    "beverage": "Nước uống",
     "coffee": "Cà phê",
     "tea": "Trà",
+    "restaurant": "Nhà hàng",
+    "cafeteria": "Quán ăn",
+    "indoors": "Trong phòng",
+    # Receipts / Documents
     "receipt": "Hóa đơn",
     "invoice": "Biên lai",
     "whiteboard": "Bảng viết",
     "document": "Tài liệu",
     "paper": "Giấy tờ",
+    "text": "Văn bản",
+    # Audio / Video
+    "speech": "Giọng nói",
+    "audio": "Ghi âm",
+    "video": "Video",
+    "music": "Âm thanh",
 }
+
+
+def translate_labels(labels: list[str]) -> list[str]:
+    """Translate raw Rekognition English labels to clean, natural Vietnamese tags."""
+    seen = set()
+    vietnamese_tags = []
+    for l in labels:
+        clean_key = l.lower().strip()
+        trans = LABEL_TRANSLATIONS.get(clean_key, l.capitalize())
+        # Filter out noisy tags
+        if trans.lower() in {"accessories", "bag", "handbag", "clothing", "apparel"}:
+            continue
+        if trans not in seen:
+            seen.add(trans)
+            vietnamese_tags.append(trans)
+    return vietnamese_tags[:6]
 
 
 def _clean_ocr_snippet(ocr_text: str) -> str:
     """Extract a clean, readable text snippet from OCR, filtering out noisy symbols."""
     lines = [line.strip() for line in (ocr_text or "").splitlines() if line.strip()]
-    meaningful = [l for l in lines if not l.startswith("http") and len(l) > 2]
+    meaningful = [l for l in lines if not l.startswith("http") and len(l) > 2 and not l.isdigit()]
     if meaningful:
         combined = " • ".join(meaningful[:3])
-        return combined[:100]
+        return combined[:80]
     return ""
 
 
@@ -97,37 +165,29 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
                 labels, ocr = runtime.vision.analyze_image(object_key, name)
             except Exception as exc:
                 logger.warning("Vision analysis error on %s: %s", name, exc)
-                labels = ["Image", "Photo"]
+                labels = ["Ảnh"]
                 ocr = ""
         elif media_type in {"audio", "video"}:
             try:
                 media_format = {**AUDIO_FORMATS, **VIDEO_FORMATS}.get(ext, "mp4")
                 transcript = runtime.speech.transcribe(object_key, media_format)
-                labels = ["Speech", "Audio"] if transcript else ["Media"]
+                labels = ["Giọng nói", "Ghi âm"] if transcript else ["Phương tiện"]
             except Exception as exc:
                 logger.warning("Speech analysis error on %s: %s", name, exc)
-                transcript = f"Bản ghi đa phương tiện: {name}"
-                labels = ["Audio"]
+                labels = ["Ghi âm"]
         else:
-            labels = ["Document"]
+            labels = ["Tài liệu"]
 
         blob = " ".join([*labels, ocr, transcript, name])
-        record.labels = labels
+        record.category = infer_category(media_type, labels, blob)
+        record.labels = translate_labels(labels)
         record.ocr_text = ocr
         record.transcript = transcript
-        record.category = infer_category(media_type, labels, blob)
         record.summary = _build_summary(record)
         record.status = "READY"
         record.error = None
         runtime.catalog.put(record)
         runtime.metrics.emit("MediaIngested", 1)
-        logger.info(
-            "ingest_ready file_id=%s type=%s labels=%s provider=%s",
-            file_id,
-            media_type,
-            len(labels),
-            runtime.provider,
-        )
         return record
     except Exception as exc:
         logger.exception("ingest_failed file_id=%s", file_id)
@@ -142,27 +202,23 @@ def _build_summary(record: MediaRecord) -> str:
     category_name = CATEGORY_LABELS.get(record.category, record.category)
 
     if record.media_type == "audio":
-        ext = os.path.splitext(record.filename)[1].upper().replace(".", "")
-        size_str = f"{record.size_bytes / (1024 * 1024):.1f} MB" if record.size_bytes > 0 else ""
-        if record.transcript and not record.transcript.startswith("Bản ghi đa phương tiện"):
-            return f"Bản ghi âm thanh ({ext}, {size_str}): \"{record.transcript[:120]}...\""
-        return f"File ghi âm giọng nói {ext} ({size_str}) đã lưu trữ an toàn trên Amazon S3 và lập chỉ mục trong danh mục {category_name}."
+        if record.transcript and not record.transcript.startswith("Bản ghi"):
+            clean_first = record.transcript.strip()[:100].rstrip(".")
+            return f"Bản ghi âm lời thoại: \"{clean_first}...\""
+        return f"File ghi âm đã lưu trữ và lập chỉ mục trong danh mục {category_name}."
 
     if record.media_type == "video":
-        ext = os.path.splitext(record.filename)[1].upper().replace(".", "")
-        size_str = f"{record.size_bytes / (1024 * 1024):.1f} MB" if record.size_bytes > 0 else ""
-        return f"Video đa phương tiện {ext} ({size_str}) được lập chỉ mục trong danh mục {category_name}."
+        return f"Tệp video đa phương tiện được lưu trữ trong danh mục {category_name}."
 
     # Image summary synthesis
-    translated_labels = [LABEL_TRANSLATIONS.get(l.lower(), l) for l in record.labels[:5]]
-    labels_str = ", ".join(translated_labels) if translated_labels else ""
+    labels_str = ", ".join(record.labels[:4]) if record.labels else ""
     ocr_snippet = _clean_ocr_snippet(record.ocr_text)
 
     if labels_str and ocr_snippet:
-        return f"Ảnh chứa: {labels_str}. Phát hiện văn bản: \"{ocr_snippet}\", phân loại vào danh mục {category_name}."
+        return f"Ảnh chụp gồm {labels_str.lower()}. Văn bản hiển thị: \"{ocr_snippet}\"."
     if labels_str:
-        return f"Ảnh được Amazon Rekognition nhận diện đặc trưng: {labels_str}, phân loại vào danh mục {category_name}."
+        return f"Ảnh chụp nhận diện {labels_str.lower()}, xếp vào danh mục {category_name}."
     if ocr_snippet:
-        return f"Văn bản trích xuất: \"{ocr_snippet}\", phân loại vào danh mục {category_name}."
+        return f"Văn bản trích xuất: \"{ocr_snippet}\"."
 
     return f"Tài liệu {record.filename} đã được phân loại vào danh mục {category_name}."
