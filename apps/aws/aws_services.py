@@ -241,11 +241,22 @@ def _local_speech_transcribe(s3_client, bucket: str, object_key: str, media_form
                     language="vi",
                     beam_size=1,
                     vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500),
                     temperature=0.0,
+                    no_speech_threshold=0.6,
+                    condition_on_previous_text=False,
                 )
-                chunks = [s.text.strip() for s in segments if s.text.strip()]
-                if chunks:
-                    return " ".join(chunks)
+                hallucinations = ["subscribe", "đăng ký kênh", "ghiền mì gõ", "like and share", "theo dõi kênh"]
+                filtered_chunks = []
+                for s in segments:
+                    txt = s.text.strip()
+                    if not txt:
+                        continue
+                    if any(h in txt.lower() for h in hallucinations):
+                        continue
+                    filtered_chunks.append(txt)
+                if filtered_chunks:
+                    return " ".join(filtered_chunks)
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
