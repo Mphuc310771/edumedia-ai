@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import os
+import re
 from typing import List, Literal, Optional
 import unicodedata
 
@@ -11,6 +14,7 @@ IngestStatus = Literal["INDEXING", "READY", "FAILED"]
 SmartCategory = Literal[
     "study",
     "pets",
+    "people",
     "food",
     "receipts",
     "scenes",
@@ -92,41 +96,75 @@ def infer_media_type(filename: str, content_type: str) -> MediaType:
     return "other"
 
 
+CATEGORY_KEYWORDS: dict[SmartCategory, tuple[tuple[str, int], ...]] = {
+    "receipts": (
+        ("receipt", 5), ("invoice", 5), ("hóa đơn", 5), ("biên lai", 5), ("bill", 4),
+        ("vat", 4), ("phiếu", 4), ("vnd", 4), ("tổng tiền", 5), ("thanh toán", 4),
+        ("payment", 4), ("cash", 3), ("tax", 4), ("total", 4), ("tiền", 3),
+    ),
+    "pets": (
+        ("pet", 5), ("dog", 5), ("cat", 5), ("canine", 5), ("feline", 5),
+        ("tiger", 5), ("lion", 5), ("bird", 5), ("chó", 5), ("mèo", 5),
+        ("thú cưng", 5), ("động vật", 4), ("hổ", 5), ("báo", 5), ("chim", 4),
+        ("fish", 4), ("cá", 4), ("animal", 3), ("mammal", 3), ("wildlife", 4),
+        ("zoo", 3), ("fauna", 3),
+    ),
+    "people": (
+        ("person", 4), ("human", 4), ("face", 4), ("portrait", 5), ("athlete", 5),
+        ("player", 4), ("soccer", 4), ("football", 4), ("sport", 3), ("man", 3),
+        ("woman", 3), ("boy", 3), ("girl", 3), ("crowd", 3), ("people", 4),
+        ("celebrity", 5), ("ronaldo", 5), ("người", 4), ("cầu thủ", 5),
+        ("chân dung", 5), ("khuôn mặt", 4), ("selfie", 5), ("head", 2),
+    ),
+    "study": (
+        ("whiteboard", 5), ("blackboard", 5), ("lecture", 5), ("slide", 4),
+        ("toán", 5), ("bài tập", 5), ("giảng đường", 5), ("giải tích", 5),
+        ("aws", 4), ("code", 4), ("document", 4), ("paper", 3), ("school", 4),
+        ("student", 4), ("university", 4), ("bảng", 4), ("học", 4), ("sách", 4),
+        ("book", 4), ("diagram", 4), ("text", 2), ("screenshot", 3),
+    ),
+    "food": (
+        ("food", 5), ("dish", 5), ("meal", 5), ("drink", 4), ("beverage", 4),
+        ("coffee", 5), ("tea", 4), ("burger", 5), ("pizza", 5), ("restaurant", 4),
+        ("cà phê", 5), ("món ăn", 5), ("đồ ăn", 5), ("ẩm thực", 5), ("trà sữa", 5),
+        ("bánh", 4), ("nước uống", 4),
+    ),
+    "scenes": (
+        ("landscape", 5), ("mountain", 5), ("beach", 5), ("sunset", 5),
+        ("sunrise", 5), ("ocean", 5), ("sea", 4), ("nature", 3), ("sky", 2),
+        ("city", 4), ("building", 4), ("street", 4), ("biển", 5), ("núi", 5),
+        ("hoàng hôn", 5), ("phố", 4), ("phong cảnh", 5), ("du lịch", 4),
+        ("travel", 4), ("outdoors", 3), ("architecture", 4),
+    ),
+}
+
+
 def infer_category(media_type: MediaType, labels: List[str], text: str) -> SmartCategory:
     if media_type == "video":
         return "videos"
+
     blob = " ".join([*labels, text]).lower()
-    if any(token in blob for token in ("receipt", "invoice", "hóa đơn", "biên lai", "bill", "vat", "phiếu", "vnd")):
-        return "receipts"
-    if any(token in blob for token in ("dog", "cat", "pet", "animal", "chó", "mèo", "lion", "sư tử")):
-        return "pets"
-    if any(token in blob for token in ("food", "coffee", "cup", "burger", "cà phê", "giày", "shoe")):
-        return "food"
-    if any(token in blob for token in ("beach", "city", "mountain", "sunset", "biển", "phố", "cảnh")):
-        return "scenes"
-    if any(
-        token in blob
-        for token in (
-            "text",
-            "whiteboard",
-            "blackboard",
-            "document",
-            "lecture",
-            "aws",
-            "toán",
-            "bảng",
-            "slide",
-            "study",
-        )
-    ):
-        return "study"
+    folded_blob = fold_text(blob)
+
+    scores: dict[SmartCategory, int] = {cat: 0 for cat in CATEGORY_KEYWORDS}
+
+    for category, kw_weights in CATEGORY_KEYWORDS.items():
+        for kw, weight in kw_weights:
+            folded_kw = fold_text(kw)
+            if folded_kw in folded_blob or kw in blob:
+                scores[category] += weight
+
+    best_cat, best_score = max(scores.items(), key=lambda x: x[1])
+    if best_score >= 3:
+        return best_cat
     return "other"
 
 
 CATEGORY_LABELS = {
     "study": "Học tập & Giảng đường",
     "pets": "Thú cưng & Động vật",
-    "food": "Ăn uống & Đồ vật",
+    "people": "Con người & Chân dung",
+    "food": "Ẩm thực & Đồ uống",
     "receipts": "Hóa đơn & Biên lai",
     "scenes": "Cảnh quan & Du lịch",
     "videos": "Video & Kỷ niệm",
@@ -141,15 +179,15 @@ def fold_text(value: str) -> str:
     return stripped.lower()
 
 
-def record_haystack(record: "MediaRecord") -> str:
-    return fold_text(
-        " ".join(
-            [
-                record.filename,
-                " ".join(record.labels),
-                record.ocr_text,
-                record.transcript,
-                record.summary,
-            ]
-        )
-    )
+def record_haystack(record: MediaRecord) -> str:
+    parts = [
+        record.filename,
+        record.media_type,
+        record.category,
+        CATEGORY_LABELS.get(record.category, record.category),
+        " ".join(record.labels),
+        record.ocr_text,
+        record.transcript,
+        record.summary,
+    ]
+    return fold_text(" ".join(parts))

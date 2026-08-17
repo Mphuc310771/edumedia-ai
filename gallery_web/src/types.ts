@@ -4,6 +4,7 @@ export type SmartCategory =
   | "all"
   | "study"
   | "pets"
+  | "people"
   | "food"
   | "receipts"
   | "scenes"

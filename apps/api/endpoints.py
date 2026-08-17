@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -136,13 +138,20 @@ def trigger_media_processing(payload: ProcessRequest):
     }
 
 
+def make_file_id(filename: str, body: bytes) -> str:
+    clean_name = os.path.basename(filename or "media.bin").strip()
+    safe_slug = re.sub(r"[^0-9a-zA-Z._-]", "_", clean_name)[:30]
+    content_hash = hashlib.md5(f"{clean_name}_{len(body)}".encode("utf-8")).hexdigest()[:10]
+    return f"{safe_slug}-{content_hash}"
+
+
 @router.post("/upload", response_model=MediaItemOut, dependencies=[Depends(verify_api_key)])
 async def upload_and_ingest(file: UploadFile = File(...)):
     runtime = get_runtime()
-    file_id = str(uuid.uuid4())
+    body = await file.read()
+    file_id = make_file_id(file.filename or "upload.bin", body)
     ext = os.path.splitext(file.filename or "upload.bin")[1]
     object_key = f"uploads/{file_id}{ext}"
-    body = await file.read()
     runtime.store.put_bytes(object_key, body, file.content_type or "application/octet-stream")
     record = ingest_object(
         file_id=file_id,
@@ -160,10 +169,10 @@ async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
     runtime = get_runtime()
     results = []
     for file in files:
-        file_id = str(uuid.uuid4())
+        body = await file.read()
+        file_id = make_file_id(file.filename or "upload.bin", body)
         ext = os.path.splitext(file.filename or "upload.bin")[1]
         object_key = f"uploads/{file_id}{ext}"
-        body = await file.read()
         runtime.store.put_bytes(object_key, body, file.content_type or "application/octet-stream")
         record = ingest_object(
             file_id=file_id,

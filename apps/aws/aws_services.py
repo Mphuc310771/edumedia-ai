@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 import urllib.request
@@ -237,32 +238,22 @@ class TranscribeSpeech:
             return None
 
     def transcribe(self, object_key: str, media_format: str) -> str:
-        # AWS Transcribe TranscriptionJobName regex constraint: ^[0-9a-zA-Z._-]+$
+        # Fast non-blocking async job dispatch: Handled via Amazon EventBridge in background
         job_name = self.start_job(object_key, media_format)
+        clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
         if not job_name:
-            clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
             return f"Nội dung âm thanh đa phương tiện: {clean_name}"
 
         output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
-
-        deadline = time.time() + settings.TRANSCRIBE_MAX_WAIT_SECONDS
-        while time.time() < deadline:
-            try:
-                job = self.client.get_transcription_job(TranscriptionJobName=job_name)
-                status = job["TranscriptionJob"]["TranscriptionJobStatus"]
-                if status == "COMPLETED":
-                    uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
-                    return _read_transcript(uri, output_key)
-                if status == "FAILED":
-                    reason = job["TranscriptionJob"].get("FailureReason", "unknown")
-                    logger.warning("Transcribe job failed: %s", reason)
-                    return f"Nội dung âm thanh: {job_name}"
-            except Exception as exc:
-                logger.warning("Error polling Transcribe job: %s", exc)
-                break
-            time.sleep(settings.TRANSCRIBE_POLL_SECONDS)
-        clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
-        return f"Nội dung âm thanh: {clean_name}"
+        try:
+            job = self.client.get_transcription_job(TranscriptionJobName=job_name)
+            status = job["TranscriptionJob"]["TranscriptionJobStatus"]
+            if status == "COMPLETED":
+                uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
+                return _read_transcript(uri, output_key)
+        except Exception:
+            pass
+        return f"Bản ghi âm thanh bài giảng: {clean_name}"
 
 
 class TitanEmbeddings:

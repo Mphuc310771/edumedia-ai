@@ -10,6 +10,7 @@ interface CategoryTabsProps {
 const TABS: { key: SmartCategory; label: string }[] = [
   { key: "all", label: "Tất cả" },
   { key: "study", label: "Học tập" },
+  { key: "people", label: "Con người" },
   { key: "pets", label: "Thú cưng" },
   { key: "food", label: "Ăn uống" },
   { key: "receipts", label: "Hóa đơn" },

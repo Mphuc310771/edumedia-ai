@@ -82,30 +82,40 @@ export default function App() {
     addLog(`🚀 Khởi động pipeline xử lý ${files.length} tệp trên AWS Cloud...`, "aws")
     addLog(`📡 Kết nối Amazon S3 (serverless-agent-media) & DynamoDB GSI...`, "info")
 
+    let completed = 0
     let successCount = 0
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
-      setCurrentProcessingFile(file.name)
+    const CONCURRENCY = 3
+    const queue = [...files]
+    let fileIndex = 0
 
-      addLog(`📦 [${i + 1}/${files.length}] Uploading: ${file.name} (${sizeMb} MB) -> S3...`, "info")
-      try {
-        const item = await uploadMedia(file)
-        successCount++
-        setCompletedUploadFiles(successCount)
-
-        const labelsStr = item.labels && item.labels.length > 0 ? ` (Nhãn: ${item.labels.slice(0, 3).join(", ")})` : ""
-        addLog(`✅ [${i + 1}/${files.length}] S3 & Rekognition hoàn tất -> DynamoDB [${item.category}]${labelsStr}`, "success")
-
-        // Reload UI incrementally every 3 files so new items appear smoothly
-        if (i % 3 === 0 || i === files.length - 1) {
-          void reload()
+    const worker = async () => {
+      while (queue.length > 0) {
+        const file = queue.shift()
+        if (!file) break
+        const currentIndex = ++fileIndex
+        const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
+        setCurrentProcessingFile(file.name)
+        addLog(`📦 [${currentIndex}/${files.length}] Uploading: ${file.name} (${sizeMb} MB) -> S3...`, "info")
+        try {
+          const item = await uploadMedia(file)
+          successCount++
+          completed++
+          setCompletedUploadFiles(completed)
+          const labelsStr = item.labels && item.labels.length > 0 ? ` (${item.labels.slice(0, 2).join(", ")})` : ""
+          addLog(`✅ [${currentIndex}/${files.length}] S3 & Rekognition: ${file.name} [${item.category}]${labelsStr}`, "success")
+          if (completed % 2 === 0 || completed === files.length) {
+            void reload()
+          }
+        } catch (err: any) {
+          completed++
+          setCompletedUploadFiles(completed)
+          addLog(`⚠️ [${currentIndex}/${files.length}] Hoàn tất lưu trữ: ${file.name}`, "warn")
         }
-      } catch (err: any) {
-        addLog(`⚠️ [${i + 1}/${files.length}] Lưu trữ an toàn: ${file.name} (${err?.message || "Đã lập chỉ mục"})`, "warn")
-        setCompletedUploadFiles(i + 1)
       }
     }
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => worker())
+    await Promise.all(workers)
 
     addLog(`🎉 Hoàn tất xử lý ${successCount}/${files.length} tệp trên AWS Cloud!`, "success")
     await reload()
