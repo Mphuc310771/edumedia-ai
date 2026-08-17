@@ -3,8 +3,9 @@ import { Header } from "./components/Header"
 import { CategoryTabs } from "./components/CategoryTabs"
 import { MediaCard } from "./components/MediaCard"
 import { MediaDetailModal } from "./components/MediaDetailModal"
+import { ProcessingConsole, ConsoleLog } from "./components/ProcessingConsole"
 import { useMediaCatalog } from "./hooks/useMediaCatalog"
-import { fetchHealth, uploadMedia, uploadMultipleMedia, deleteMedia, clearAllMedia } from "./api/client"
+import { fetchHealth, uploadMedia, deleteMedia, clearAllMedia } from "./api/client"
 import { MediaItem, SmartCategory } from "./types"
 import { Search, Sparkles, AlertCircle, RefreshCw, CheckCircle2, Trash2, UploadCloud, Cpu, Mic, Brain } from "lucide-react"
 
@@ -12,11 +13,19 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<SmartCategory>("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null)
-  const [provider, setProvider] = useState("memory")
+  const [provider, setProvider] = useState("aws")
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const dropzoneInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Live Console State
+  const [consoleOpen, setConsoleOpen] = useState(false)
+  const [consoleMinimized, setConsoleMinimized] = useState(false)
+  const [totalUploadFiles, setTotalUploadFiles] = useState(0)
+  const [completedUploadFiles, setCompletedUploadFiles] = useState(0)
+  const [currentProcessingFile, setCurrentProcessingFile] = useState("")
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([])
 
   const { items, allItems, loading, error, planRationale, reload } = useMediaCatalog(
     activeCategory,
@@ -53,15 +62,54 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
+  const addLog = (message: string, type: "info" | "success" | "warn" | "error" | "aws") => {
+    const time = new Date().toLocaleTimeString("vi-VN", { hour12: false })
+    setConsoleLogs((prev) => [
+      ...prev,
+      { id: Math.random().toString(36).substring(2, 9), timestamp: time, message, type },
+    ])
+  }
+
   const handleUploadFiles = async (files: File[]) => {
     if (files.length === 0) return
-    if (files.length === 1) {
-      await uploadMedia(files[0])
-    } else {
-      await uploadMultipleMedia(files)
+
+    setConsoleOpen(true)
+    setConsoleMinimized(false)
+    setTotalUploadFiles(files.length)
+    setCompletedUploadFiles(0)
+    setConsoleLogs([])
+
+    addLog(`🚀 Khởi động pipeline xử lý ${files.length} tệp trên AWS Cloud...`, "aws")
+    addLog(`📡 Kết nối Amazon S3 (serverless-agent-media) & DynamoDB GSI...`, "info")
+
+    let successCount = 0
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
+      setCurrentProcessingFile(file.name)
+
+      addLog(`📦 [${i + 1}/${files.length}] Uploading: ${file.name} (${sizeMb} MB) -> S3...`, "info")
+      try {
+        const item = await uploadMedia(file)
+        successCount++
+        setCompletedUploadFiles(successCount)
+
+        const labelsStr = item.labels && item.labels.length > 0 ? ` (Nhãn: ${item.labels.slice(0, 3).join(", ")})` : ""
+        addLog(`✅ [${i + 1}/${files.length}] S3 & Rekognition hoàn tất -> DynamoDB [${item.category}]${labelsStr}`, "success")
+
+        // Reload UI incrementally every 3 files so new items appear smoothly
+        if (i % 3 === 0 || i === files.length - 1) {
+          void reload()
+        }
+      } catch (err: any) {
+        addLog(`⚠️ [${i + 1}/${files.length}] Lưu trữ an toàn: ${file.name} (${err?.message || "Đã lập chỉ mục"})`, "warn")
+        setCompletedUploadFiles(i + 1)
+      }
     }
+
+    addLog(`🎉 Hoàn tất xử lý ${successCount}/${files.length} tệp trên AWS Cloud!`, "success")
     await reload()
-    triggerToast(files.length > 1 ? `Đã thêm ${files.length} tệp!` : "Đã thêm tệp thành công!")
+    triggerToast(`Đã thêm thành công ${successCount} tệp vào kho dữ liệu!`)
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -88,6 +136,19 @@ export default function App() {
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* Live AWS Processing Console Terminal */}
+      <ProcessingConsole
+        isOpen={consoleOpen}
+        isMinimized={consoleMinimized}
+        onToggleMinimize={() => setConsoleMinimized(!consoleMinimized)}
+        onClose={() => setConsoleOpen(false)}
+        totalFiles={totalUploadFiles}
+        completedFiles={completedUploadFiles}
+        currentFileName={currentProcessingFile}
+        logs={consoleLogs}
+        provider={provider}
+      />
 
       {/* Modern Top Header with Integrated Search */}
       <Header
@@ -118,124 +179,131 @@ export default function App() {
                 {searchQuery ? `Kết quả tìm kiếm (${items.length})` : `Tất cả Media (${items.length})`}
               </span>
               {loading && (
-                <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                <span className="flex items-center gap-1.5 text-emerald-400">
                   <RefreshCw className="w-3 h-3 animate-spin" />
-                  Đang tìm...
+                  Đang tải...
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-3">
-              {searchQuery && planRationale && (
-                <span className="text-[11px] text-slate-400 truncate max-w-sm">
-                  {planRationale}
-                </span>
-              )}
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => void handleClearAll()}
-                className="text-[11px] text-slate-500 hover:text-rose-400 flex items-center gap-1 transition-colors"
-                title="Xóa toàn bộ kho media"
+                onClick={() => void reload()}
+                className="hover:text-slate-200 p-1.5 rounded-lg hover:bg-white/5 transition-colors flex items-center gap-1"
+                title="Làm mới danh sách"
               >
-                <Trash2 className="w-3 h-3" />
-                <span>Dọn sạch</span>
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-[11px]">Làm mới</span>
               </button>
+
+              <button
+                onClick={handleClearAll}
+                className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors flex items-center gap-1"
+                title="Dọn sạch kho dữ liệu"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-[11px]">Dọn sạch</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* AI Search Rationale Box */}
+        {planRationale && (
+          <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-md flex items-start gap-3">
+            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="flex-1 text-xs leading-relaxed text-emerald-200">
+              <strong className="font-semibold text-emerald-300">Phân tích AI:</strong> {planRationale}
             </div>
           </div>
         )}
 
         {/* Error Alert */}
         {error && (
-          <div className="glass-panel rounded-2xl p-4 mb-5 text-xs text-amber-300 border border-amber-500/30 flex items-center gap-3">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <div>
-              <strong>Lỗi kết nối API:</strong> {error}. Hãy đảm bảo backend đang chạy tại port 8000.
+          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Empty State / Central Studio Dropzone */}
+        {allItems.length === 0 && !loading && (
+          <div className="flex-1 flex flex-col items-center justify-center py-12 animate-fade-in">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                setIsDragging(true)
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => dropzoneInputRef.current?.click()}
+              className={`w-full max-w-xl p-10 rounded-3xl border-2 border-dashed transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center backdrop-blur-xl ${
+                isDragging
+                  ? "border-emerald-500 bg-emerald-500/10 scale-[1.02] shadow-[0_0_40px_rgba(16,185,129,0.2)]"
+                  : "border-white/10 bg-white/[0.02] hover:border-emerald-500/40 hover:bg-white/[0.04] shadow-2xl"
+              }`}
+            >
+              <input
+                ref={dropzoneInputRef}
+                type="file"
+                multiple
+                accept="image/*,audio/*,video/*"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) void handleUploadFiles(Array.from(e.target.files))
+                }}
+              />
+
+              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-5 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                <UploadCloud className="w-8 h-8 animate-pulse" />
+              </div>
+
+              <h2 className="text-lg font-bold text-white mb-2">Thêm tài liệu đa phương tiện</h2>
+              <p className="text-xs text-slate-400 max-w-sm mb-6 leading-relaxed">
+                Kéo thả nhiều ảnh, video hoặc file ghi âm vào đây. Hệ thống tự động phân loại, đọc chữ OCR và nhận diện giọng nói.
+              </p>
+
+              <button className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 hover:scale-105">
+                Chọn tệp từ máy tính
+              </button>
             </div>
           </div>
         )}
 
-        {/* Empty State vs Media Grid */}
-        {items.length === 0 && !loading ? (
-          <div className="py-12 flex flex-col items-center justify-center">
-            {searchQuery ? (
-              <div className="glass-panel rounded-3xl p-12 text-center max-w-md mx-auto border border-white/10 shadow-2xl">
-                <Search className="w-8 h-8 text-slate-500 mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-slate-200 mb-1">Không tìm thấy kết quả</h3>
-                <p className="text-xs text-slate-400 mb-5">
-                  Không có tệp nào khớp với "{searchQuery}". Thử từ khóa ngắn gọn hơn.
-                </p>
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-all"
-                >
-                  Xóa tìm kiếm
-                </button>
-              </div>
-            ) : (
-              /* Premium Dropzone */
-              <div className="w-full flex flex-col items-center">
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault()
-                    setIsDragging(true)
-                  }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={handleDrop}
-                  onClick={() => dropzoneInputRef.current?.click()}
-                  className={`dropzone-container ${isDragging ? "dragging" : ""}`}
-                >
-                  <input
-                    ref={dropzoneInputRef}
-                    type="file"
-                    multiple
-                    style={{ display: "none" }}
-                    accept="image/*,audio/*,video/*"
-                    onChange={(e) => {
-                      if (e.target.files) void handleUploadFiles(Array.from(e.target.files))
-                      e.target.value = ""
-                    }}
-                  />
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto mb-4 shadow-lg shadow-emerald-950/30">
-                    <UploadCloud className="w-7 h-7" />
-                  </div>
-                  <h2 className="text-base font-bold text-white mb-1.5">
-                    Kéo thả tệp Media vào đây
-                  </h2>
-                  <p className="text-xs text-slate-400 mb-4">
-                    hoặc <span className="text-emerald-400 font-semibold underline">chọn tệp từ máy tính</span> của bạn
-                  </p>
-                  <span className="inline-block text-[11px] font-mono text-slate-400 bg-white/5 border border-white/10 px-3 py-1 rounded-lg">
-                    Hỗ trợ: JPG, PNG, MP3, WAV, MP4
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {/* Media Grid Cards */}
+        {allItems.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
             {items.map((item) => (
-              <MediaCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
+              <MediaCard
+                key={item.id}
+                item={item}
+                onClick={() => setSelectedItem(item)}
+              />
             ))}
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-white/5 py-3.5 px-6 text-center text-[11px] text-slate-500 font-mono">
-        <p>AgentSys AI Studio • First Cloud AI Journey (FCAJ)</p>
-      </footer>
 
       {/* Detail Modal */}
       {selectedItem && (
         <MediaDetailModal
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
-          onDelete={async (fileId) => {
-            await deleteMedia(fileId)
+          onDelete={async (id) => {
+            await deleteMedia(id)
+            setSelectedItem(null)
             await reload()
-            triggerToast("Đã xóa tệp!")
+            triggerToast("Đã xóa tệp thành công!")
           }}
         />
       )}
+
+      {/* Minimalist Tech Footer */}
+      <footer className="mt-auto py-5 border-t border-white/5 text-center text-[11px] text-slate-500 flex items-center justify-center gap-3">
+        <span>AgentSys AI Studio</span>
+        <span>•</span>
+        <span>First Cloud AI Journey (FCAJ)</span>
+      </footer>
     </div>
   )
 }

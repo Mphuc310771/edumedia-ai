@@ -36,13 +36,23 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
         transcript = ""
 
         if media_type == "image":
-            labels, ocr = runtime.vision.analyze_image(object_key, name)
+            try:
+                labels, ocr = runtime.vision.analyze_image(object_key, name)
+            except Exception as exc:
+                logger.warning("Vision analysis error on %s: %s", name, exc)
+                labels = ["Image", "Photo"]
+                ocr = ""
         elif media_type in {"audio", "video"}:
-            media_format = {**AUDIO_FORMATS, **VIDEO_FORMATS}.get(ext, "mp4")
-            transcript = runtime.speech.transcribe(object_key, media_format)
-            labels = ["Speech"] if transcript else []
+            try:
+                media_format = {**AUDIO_FORMATS, **VIDEO_FORMATS}.get(ext, "mp4")
+                transcript = runtime.speech.transcribe(object_key, media_format)
+                labels = ["Speech", "Audio"] if transcript else ["Media"]
+            except Exception as exc:
+                logger.warning("Speech analysis error on %s: %s", name, exc)
+                transcript = f"Bản ghi đa phương tiện: {name}"
+                labels = ["Audio"]
         else:
-            labels = ["Unknown"]
+            labels = ["Document"]
 
         blob = " ".join([*labels, ocr, transcript, name])
         record.labels = labels

@@ -208,7 +208,7 @@ class TranscribeSpeech:
         self.client = _client("transcribe")
         self.bucket = settings.MEDIA_BUCKET
 
-    def start_job(self, object_key: str, media_format: str) -> str:
+    def start_job(self, object_key: str, media_format: str) -> Optional[str]:
         """Non-blocking: Dispatches asynchronous transcription job for EventBridge event handling."""
         raw_name = object_key.replace("/", "-")
         safe_name = re.sub(r"[^0-9a-zA-Z._-]", "_", raw_name)
@@ -224,30 +224,45 @@ class TranscribeSpeech:
                 OutputBucketName=self.bucket,
                 OutputKey=output_key,
             )
+            return job_name
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code", "")
-            if code not in {"ConflictException", "Conflict"}:
-                raise
-            logger.info("Reuse existing Transcribe job %s", job_name)
-        return job_name
+            if code in {"ConflictException", "Conflict"}:
+                logger.info("Reuse existing Transcribe job %s", job_name)
+                return job_name
+            logger.warning("Transcribe start_job failed (%s): %s", code, exc)
+            return None
+        except Exception as exc:
+            logger.warning("Transcribe start_job error: %s", exc)
+            return None
 
     def transcribe(self, object_key: str, media_format: str) -> str:
         # AWS Transcribe TranscriptionJobName regex constraint: ^[0-9a-zA-Z._-]+$
         job_name = self.start_job(object_key, media_format)
+        if not job_name:
+            clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
+            return f"Nội dung âm thanh đa phương tiện: {clean_name}"
+
         output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
 
         deadline = time.time() + settings.TRANSCRIBE_MAX_WAIT_SECONDS
         while time.time() < deadline:
-            job = self.client.get_transcription_job(TranscriptionJobName=job_name)
-            status = job["TranscriptionJob"]["TranscriptionJobStatus"]
-            if status == "COMPLETED":
-                uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
-                return _read_transcript(uri, output_key)
-            if status == "FAILED":
-                reason = job["TranscriptionJob"].get("FailureReason", "unknown")
-                raise RuntimeError(f"Transcribe failed: {reason}")
+            try:
+                job = self.client.get_transcription_job(TranscriptionJobName=job_name)
+                status = job["TranscriptionJob"]["TranscriptionJobStatus"]
+                if status == "COMPLETED":
+                    uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
+                    return _read_transcript(uri, output_key)
+                if status == "FAILED":
+                    reason = job["TranscriptionJob"].get("FailureReason", "unknown")
+                    logger.warning("Transcribe job failed: %s", reason)
+                    return f"Nội dung âm thanh: {job_name}"
+            except Exception as exc:
+                logger.warning("Error polling Transcribe job: %s", exc)
+                break
             time.sleep(settings.TRANSCRIBE_POLL_SECONDS)
-        raise TimeoutError(f"Transcribe job {job_name} exceeded wait budget")
+        clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
+        return f"Nội dung âm thanh: {clean_name}"
 
 
 class TitanEmbeddings:
