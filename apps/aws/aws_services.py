@@ -204,18 +204,53 @@ class RekognitionVision:
         return labels, "\n".join(lines)
 
 
+_WHISPER_MODEL = None
+
+
+def _get_whisper_model():
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        try:
+            from faster_whisper import WhisperModel
+
+            logger.info("Initializing faster-whisper base model on CPU...")
+            _WHISPER_MODEL = WhisperModel("base", device="cpu", compute_type="int8")
+        except Exception as exc:
+            logger.warning("Could not initialize WhisperModel: %s", exc)
+    return _WHISPER_MODEL
+
+
 def _local_speech_transcribe(s3_client, bucket: str, object_key: str, media_format: str) -> str:
-    """Speech transcriber: downloads audio bytes from S3 and transcribes Vietnamese speech."""
+    """State-of-the-art automatic speech transcriber using faster-whisper on audio stream."""
+    import tempfile
+
     try:
+        resp = s3_client.get_object(Bucket=bucket, Key=object_key)
+        body = resp["Body"].read()
+
+        model = _get_whisper_model()
+        if model:
+            ext = f".{media_format}" if not media_format.startswith(".") else media_format
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(body)
+                tmp_path = tmp.name
+
+            try:
+                segments, info = model.transcribe(tmp_path, language="vi", beam_size=5, vad_filter=True)
+                chunks = [s.text.strip() for s in segments if s.text.strip()]
+                if chunks:
+                    return " ".join(chunks)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+        # Fallback to speech_recognition if whisper is not available
         import io
         import speech_recognition as sr
         from pydub import AudioSegment
 
-        resp = s3_client.get_object(Bucket=bucket, Key=object_key)
-        body = resp["Body"].read()
-
         sound = AudioSegment.from_file(io.BytesIO(body), format=media_format)
-        snippet = sound[:60000]  # First 60s
+        snippet = sound[:60000]
         wav_io = io.BytesIO()
         snippet.export(wav_io, format="wav")
         wav_io.seek(0)
@@ -226,7 +261,7 @@ def _local_speech_transcribe(s3_client, bucket: str, object_key: str, media_form
             text = recognizer.recognize_google(audio_data, language="vi-VN")
             return text.strip()
     except Exception as exc:
-        logger.warning("Speech transcriber note on %s: %s", object_key, exc)
+        logger.warning("Speech transcriber error on %s: %s", object_key, exc)
         return ""
 
 
