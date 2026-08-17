@@ -204,6 +204,32 @@ class RekognitionVision:
         return labels, "\n".join(lines)
 
 
+def _local_speech_transcribe(s3_client, bucket: str, object_key: str, media_format: str) -> str:
+    """Speech transcriber: downloads audio bytes from S3 and transcribes Vietnamese speech."""
+    try:
+        import io
+        import speech_recognition as sr
+        from pydub import AudioSegment
+
+        resp = s3_client.get_object(Bucket=bucket, Key=object_key)
+        body = resp["Body"].read()
+
+        sound = AudioSegment.from_file(io.BytesIO(body), format=media_format)
+        snippet = sound[:60000]  # First 60s
+        wav_io = io.BytesIO()
+        snippet.export(wav_io, format="wav")
+        wav_io.seek(0)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(wav_io) as source:
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language="vi-VN")
+            return text.strip()
+    except Exception as exc:
+        logger.warning("Speech transcriber note on %s: %s", object_key, exc)
+        return ""
+
+
 class TranscribeSpeech:
     def __init__(self):
         self.client = _client("transcribe")
@@ -238,21 +264,25 @@ class TranscribeSpeech:
             return None
 
     def transcribe(self, object_key: str, media_format: str) -> str:
-        # Fast non-blocking async job dispatch: Handled via Amazon EventBridge in background
         job_name = self.start_job(object_key, media_format)
-        clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
-        if not job_name:
-            return f"Nội dung âm thanh đa phương tiện: {clean_name}"
+        if job_name:
+            output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
+            try:
+                job = self.client.get_transcription_job(TranscriptionJobName=job_name)
+                status = job["TranscriptionJob"]["TranscriptionJobStatus"]
+                if status == "COMPLETED":
+                    uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
+                    return _read_transcript(uri, output_key)
+            except Exception:
+                pass
 
-        output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
-        try:
-            job = self.client.get_transcription_job(TranscriptionJobName=job_name)
-            status = job["TranscriptionJob"]["TranscriptionJobStatus"]
-            if status == "COMPLETED":
-                uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
-                return _read_transcript(uri, output_key)
-        except Exception:
-            pass
+        # Fallback to speech transcriber from S3 audio
+        s3 = _client("s3")
+        speech_text = _local_speech_transcribe(s3, self.bucket, object_key, media_format)
+        if speech_text:
+            return speech_text
+
+        clean_name = os.path.basename(object_key).rsplit(".", 1)[0]
         return f"Bản ghi âm thanh bài giảng: {clean_name}"
 
 
