@@ -1,0 +1,6 @@
+{{- $path := strings.TrimPrefix "/" .Destination -}}
+{{- if or (strings.HasPrefix .Destination "http://") (strings.HasPrefix .Destination "https://") -}}
+<img src="{{ .Destination }}" alt="{{ .Text }}" {{ with .Title }}title="{{ . }}"{{ end }} />
+{{- else -}}
+<img src="{{ $path | relURL }}" alt="{{ .Text }}" {{ with .Title }}title="{{ . }}"{{ end }} />
+{{- end -}}
