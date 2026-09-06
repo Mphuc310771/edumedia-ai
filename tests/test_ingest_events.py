@@ -97,6 +97,50 @@ def test_handler_reports_batch_failure(monkeypatch):
     assert result["batchItemFailures"] == [{"itemIdentifier": "bad-1"}]
 
 
+def test_apply_transcribe_job_writes_transcript(monkeypatch):
+    from apps.domain import MediaRecord
+    from apps.workers.ingestion import apply_transcribe_job
+
+    class FakeSpeech:
+        def read_job_transcript(self, job_name):
+            assert job_name == "agentsys--demo--uploads_demo_mp3"
+            return "Các em nhớ ôn Virtual Memory."
+
+    class FakeCatalog:
+        def __init__(self):
+            self.record = MediaRecord(
+                file_id="demo",
+                filename="demo.mp3",
+                s3_key="uploads/demo.mp3",
+                media_type="audio",
+                content_type="audio/mpeg",
+                status="INDEXING",
+                transcribe_job_name="agentsys--demo--uploads_demo_mp3",
+            )
+
+        def list_all(self):
+            return [self.record]
+
+        def get(self, file_id):
+            return self.record if file_id == "demo" else None
+
+        def put(self, record):
+            self.record = record
+
+    class FakeRuntime:
+        provider = "aws"
+        catalog = FakeCatalog()
+        speech = FakeSpeech()
+        planner = object()
+        metrics = type("M", (), {"emit": staticmethod(lambda *a, **k: None)})()
+
+    monkeypatch.setattr("apps.workers.ingestion.get_runtime", lambda: FakeRuntime)
+    result = apply_transcribe_job("agentsys--demo--uploads_demo_mp3", "COMPLETED")
+    assert result["ok"] is True
+    assert result["status"] == "READY"
+    assert "Virtual Memory" in FakeRuntime.catalog.record.transcript
+
+
 def test_handler_eventbridge_transcribe_completion():
     event = {
         "source": "aws.transcribe",

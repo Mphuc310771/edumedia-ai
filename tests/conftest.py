@@ -1,31 +1,44 @@
 import os
 
-os.environ.setdefault("MEDIA_PROVIDER", "memory")
-os.environ.setdefault("SEED_DEMO_ITEMS", "true")
 os.environ.setdefault("ADMIN_API_KEY", "test-key")
 os.environ.setdefault("ENVIRONMENT", "development")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
+os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import pytest
 from fastapi.testclient import TestClient
+from moto import mock_aws
 
-from apps.aws.memory import reset_memory
+import apps.aws.providers as providers
 from apps.aws.providers import reset_runtime
 from apps.api.main import app
 from config.settings import settings
+from tests.fakes import build_test_runtime, seed_moto_catalog, setup_moto_infra
+
+ONLINE = {name: "ONLINE" for name in ("sts", "s3", "dynamodb", "rekognition", "transcribe", "bedrock")}
 
 
 @pytest.fixture(autouse=True)
-def reset_state():
-    settings.MEDIA_PROVIDER = "memory"
-    settings.SEED_DEMO_ITEMS = True
+def moto_aws_runtime(monkeypatch):
     settings.ENVIRONMENT = "development"
     if not settings.ADMIN_API_KEY:
         settings.ADMIN_API_KEY = "test-key"
-    reset_memory()
-    reset_runtime()
-    yield
-    reset_memory()
-    reset_runtime()
+
+    with mock_aws():
+        setup_moto_infra()
+        seed_moto_catalog()
+        monkeypatch.setattr(providers, "build_runtime", build_test_runtime)
+        monkeypatch.setattr(
+            "apps.aws.aws_services.ping_aws",
+            lambda ttl_seconds=0: {"status": dict(ONLINE), "errors": {}},
+        )
+        reset_runtime()
+        yield
+        reset_runtime()
 
 
 @pytest.fixture

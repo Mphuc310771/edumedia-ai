@@ -1,5 +1,5 @@
 [run]
-source = apps, utils
+source = apps, pipeline
 omit =
     tests/*
     config/*

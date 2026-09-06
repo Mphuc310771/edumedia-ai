@@ -26,11 +26,16 @@ def test_template_uses_least_privilege_and_required_services():
     assert "foundation-model/*" in text
     assert "MediaIngestFailed" in text
     assert "ApproximateNumberOfMessagesVisible" in text
-    assert "ReservedConcurrentExecutions: 2" in text
+    assert "Timeout: 120" in text
     assert "SSEEnabled: true" in text
     assert "TranscribeStateChange" in text
     assert "EventBridgeRule" in text
-    assert "aws.transcribe" in text
+    assert "bedrock:GetFoundationModel" in text
+    assert "bedrock:ListFoundationModels" not in text
+    assert "Sid: DynamoAccess" in text
+    assert "${MediaBucket.Arn}/uploads/*" in text
+    assert "${MediaBucket.Arn}/transcripts/*" in text
+    assert "${MediaBucket.Arn}/thumbs/*" in text
 
 
 def test_no_legacy_local_stack_files():
@@ -43,6 +48,10 @@ def test_no_legacy_local_stack_files():
         "apps/agent/executor.py",
         "utils/embeddings.py",
         "demo_ui.py",
+        "apps/aws/memory.py",
+        "apps/aws/local_gpu.py",
+        "scripts/verify_local.py",
     ]
     for rel in leftovers:
         assert not (ROOT / rel).exists(), rel
+    assert (ROOT / "apps" / "taxonomy.yaml").exists()
