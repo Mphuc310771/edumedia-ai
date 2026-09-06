@@ -56,6 +56,10 @@ class MediaItemOut(BaseModel):
     matchedOn: List[str] = Field(default_factory=list)
     matchedFields: List[str] = Field(default_factory=list)
     pipeline: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    analysisSource: str = ""
+    subject: str = "none"
+    subjectLabel: str = ""
 
 
 class AgentQueryResponse(BaseModel):

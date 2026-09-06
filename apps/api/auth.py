@@ -1,6 +1,9 @@
 import base64
+import hashlib
+import hmac
 import json
 import logging
+import time
 from typing import Optional
 
 from fastapi import HTTPException, Request, Security, status
@@ -14,18 +17,99 @@ logger = logging.getLogger(__name__)
 api_key_header = APIKeyHeader(name=settings.API_KEY_HEADER_NAME, auto_error=False)
 bearer_scheme = HTTPBearer(auto_error=False)
 
+TOKEN_TTL_SECONDS = 12 * 3600
 
-def _decode_unverified_jwt_claims(token: str) -> dict:
-    """Extract claims from Cognito JWT Bearer token payload for user context."""
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padded = value + "=" * ((4 - len(value) % 4) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _get_live_credentials() -> tuple[str, str]:
+    expected_user = (settings.ADMIN_USERNAME or "admin").strip()
+    expected_pass = (settings.ADMIN_PASSWORD or settings.ADMIN_API_KEY or "").strip()
     try:
-        parts = token.split(".")
-        if len(parts) >= 2:
-            padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
-            payload_bytes = base64.urlsafe_b64decode(padded)
-            return json.loads(payload_bytes.decode("utf-8"))
-    except Exception as exc:
-        logger.debug("Failed to decode token payload: %s", exc)
-    return {}
+        from config.settings import _ENV_FILE
+
+        if _ENV_FILE.exists():
+            for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("ADMIN_PASSWORD="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        expected_pass = val
+                elif line.startswith("ADMIN_API_KEY=") and not expected_pass:
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        expected_pass = val
+                elif line.startswith("ADMIN_USERNAME="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        expected_user = val
+    except Exception:
+        pass
+    return expected_user, expected_pass
+
+
+def _secret() -> bytes:
+    """Derive the HMAC signing secret from configured credentials."""
+    _, key = _get_live_credentials()
+    secret = key or settings.ADMIN_API_KEY or "agentsys-dev-only"
+    if secret == "agentsys-dev-only":
+        logger.warning(
+            "auth_secret_fallback: Using default secret. "
+            "Set ADMIN_API_KEY or ADMIN_PASSWORD in .env for production.",
+        )
+    return secret.encode("utf-8")
+
+
+def issue_session_token(username: str) -> str:
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    now = int(time.time())
+    payload = _b64url(
+        json.dumps(
+            {"sub": username, "iat": now, "exp": now + TOKEN_TTL_SECONDS},
+            separators=(",", ":"),
+        ).encode()
+    )
+    signing = f"{header}.{payload}".encode()
+    sig = _b64url(hmac.new(_secret(), signing, hashlib.sha256).digest())
+    return f"{header}.{payload}.{sig}"
+
+
+def verify_session_token(token: str) -> Optional[str]:
+    try:
+        header_b64, payload_b64, sig_b64 = token.split(".")
+        signing = f"{header_b64}.{payload_b64}".encode()
+        expected = hmac.new(_secret(), signing, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, _b64url_decode(sig_b64)):
+            return None
+        claims = json.loads(_b64url_decode(payload_b64))
+        if int(claims.get("exp", 0)) < int(time.time()):
+            return None
+        return str(claims.get("sub") or "")
+    except Exception:
+        return None
+
+
+def _eq(left: str, right: str) -> bool:
+    left_b = left.encode("utf-8")
+    right_b = right.encode("utf-8")
+    if len(left_b) != len(right_b):
+        hmac.compare_digest(left_b, left_b)
+        return False
+    return hmac.compare_digest(left_b, right_b)
+
+
+def authenticate_password(username: str, password: str) -> bool:
+    expected_user, expected_pass = _get_live_credentials()
+    if not expected_pass:
+        return False
+    return _eq(username.strip(), expected_user) and _eq(password, expected_pass)
 
 
 def verify_api_key(
@@ -33,35 +117,19 @@ def verify_api_key(
     api_key: Optional[str] = Security(api_key_header),
     bearer_auth: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ) -> str:
-    """
-    Enterprise Dual-Authentication Guard:
-    1. Accepts Amazon Cognito User Pool JWT Bearer tokens (`Authorization: Bearer <token>`).
-    2. Accepts API Keys for service-to-service / developer integrations (`X-API-Key: <key>`).
-    """
     expected = settings.ADMIN_API_KEY
 
-    # 1. Check for Amazon Cognito Bearer Token
     if bearer_auth and bearer_auth.credentials:
-        token = bearer_auth.credentials
-        claims = _decode_unverified_jwt_claims(token)
-        user_sub = claims.get("sub") or claims.get("cognito:username") or claims.get("email")
-        if user_sub or token.startswith("cognito-"):
-            logger.debug("Authenticated via Cognito JWT: user=%s", user_sub)
-            return f"cognito:{user_sub or 'authenticated-user'}"
+        user = verify_session_token(bearer_auth.credentials)
+        if user:
+            return f"user:{user}"
 
-    # 2. Check for X-API-Key Header
     incoming = api_key or ""
-    if settings.ENVIRONMENT == "development" and not expected:
-        return "dev-no-auth"
-
-    if settings.ENVIRONMENT == "development" and not incoming:
-        return expected or "dev-no-auth"
-
-    if expected and incoming == expected:
+    if expected and hmac.compare_digest(incoming, expected):
         return incoming
 
-    logger.warning("Rejected API request: Missing/invalid X-API-Key and no valid Cognito token")
+    logger.warning("Rejected API request path=%s", request.url.path)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Unauthorized: Valid X-API-Key header or Cognito Bearer token required",
+        detail="Cần đăng nhập hoặc X-API-Key hợp lệ",
     )

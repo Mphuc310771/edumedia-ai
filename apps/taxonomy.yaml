@@ -1,0 +1,495 @@
+# AgentSys taxonomy — edit this file to add subjects/categories without changing Python.
+# Matching is whole-word via FlashText on folded (unaccented) text.
+
+categories:
+  study:
+    label: "Học tập & Giảng đường"
+    description: "bảng đen whiteboard classroom bài giảng slide bài tập giải tích giảng đường sinh viên đại học notebook đề thi giáo trình"
+    keywords:
+      - {term: whiteboard, weight: 8}
+      - {term: white board, weight: 8}
+      - {term: blackboard, weight: 8}
+      - {term: black board, weight: 8}
+      - {term: chalkboard, weight: 8}
+      - {term: handwriting, weight: 6}
+      - {term: bảng viết, weight: 8}
+      - {term: đề thi, weight: 8}
+      - {term: học kỳ, weight: 7}
+      - {term: phương trình, weight: 7}
+      - {term: mathematical equation, weight: 8}
+      - {term: lecture, weight: 7}
+      - {term: slide, weight: 6}
+      - {term: toán, weight: 7}
+      - {term: bài tập, weight: 7}
+      - {term: giảng đường, weight: 7}
+      - {term: giải tích, weight: 8}
+      - {term: classroom, weight: 8}
+      - {term: bài giảng, weight: 8}
+      - {term: giáo trình, weight: 8}
+      - {term: đề kiểm tra, weight: 8}
+  receipts:
+    label: "Hóa đơn & Biên lai"
+    description: "hóa đơn biên lai invoice receipt VAT tổng tiền thanh toán VND bill"
+    keywords:
+      - {term: receipt, weight: 8}
+      - {term: invoice, weight: 8}
+      - {term: hóa đơn, weight: 8}
+      - {term: biên lai, weight: 8}
+      - {term: bill, weight: 6}
+      - {term: tổng tiền, weight: 8}
+      - {term: thanh toán, weight: 7}
+      - {term: payment, weight: 6}
+      - {term: cash, weight: 5}
+      - {term: tax, weight: 5}
+      - {term: vnd, weight: 6}
+  pets:
+    label: "Thú cưng & Động vật"
+    description: "chó mèo thú cưng động vật pet dog cat golden retriever mammal wildlife"
+    keywords:
+      - {term: pet, weight: 8}
+      - {term: dog, weight: 8}
+      - {term: cat, weight: 8}
+      - {term: canine, weight: 8}
+      - {term: feline, weight: 8}
+      - {term: tiger, weight: 8}
+      - {term: lion, weight: 8}
+      - {term: bird, weight: 8}
+      - {term: chó, weight: 8}
+      - {term: mèo, weight: 8}
+      - {term: thú cưng, weight: 8}
+      - {term: động vật, weight: 7}
+      - {term: hổ, weight: 8}
+      - {term: chim, weight: 7}
+      - {term: fish, weight: 6}
+      - {term: cá, weight: 6}
+      - {term: animal, weight: 6}
+      - {term: mammal, weight: 6}
+      - {term: wildlife, weight: 7}
+      - {term: zoo, weight: 6}
+      - {term: fauna, weight: 6}
+  people:
+    label: "Con người & Chân dung"
+    description: "người khuôn mặt chân dung selfie cầu thủ portrait face person athlete"
+    keywords:
+      - {term: person, weight: 7}
+      - {term: human, weight: 7}
+      - {term: face, weight: 7}
+      - {term: portrait, weight: 8}
+      - {term: athlete, weight: 8}
+      - {term: player, weight: 7}
+      - {term: soccer, weight: 7}
+      - {term: football, weight: 7}
+      - {term: sport, weight: 6}
+      - {term: man, weight: 6}
+      - {term: woman, weight: 6}
+      - {term: boy, weight: 6}
+      - {term: girl, weight: 6}
+      - {term: crowd, weight: 6}
+      - {term: people, weight: 7}
+      - {term: celebrity, weight: 8}
+      - {term: ronaldo, weight: 9}
+      - {term: messi, weight: 9}
+      - {term: người, weight: 7}
+      - {term: cầu thủ, weight: 8}
+      - {term: chân dung, weight: 8}
+      - {term: khuôn mặt, weight: 7}
+      - {term: selfie, weight: 8}
+  food:
+    label: "Ẩm thực & Đồ uống"
+    description: "món ăn đồ uống cà phê trà pizza burger nhà hàng food coffee meal hải sản seafood"
+    keywords:
+      - {term: food, weight: 8}
+      - {term: dish, weight: 8}
+      - {term: meal, weight: 8}
+      - {term: drink, weight: 7}
+      - {term: beverage, weight: 7}
+      - {term: coffee, weight: 8}
+      - {term: tea, weight: 7}
+      - {term: burger, weight: 8}
+      - {term: pizza, weight: 8}
+      - {term: restaurant, weight: 7}
+      - {term: seafood, weight: 8}
+      - {term: oyster, weight: 8}
+      - {term: cà phê, weight: 8}
+      - {term: món ăn, weight: 8}
+      - {term: đồ ăn, weight: 8}
+      - {term: ẩm thực, weight: 8}
+      - {term: trà sữa, weight: 8}
+      - {term: bánh, weight: 6}
+      - {term: nước uống, weight: 7}
+      - {term: hải sản, weight: 8}
+      - {term: hàu, weight: 8}
+      - {term: ốc, weight: 8}
+      - {term: đĩa ăn, weight: 8}
+      - {term: bữa ăn, weight: 8}
+  scenes:
+    label: "Cảnh quan & Du lịch"
+    description: "phong cảnh biển núi hoàng hôn bãi biển du lịch landscape beach sunset outdoor chùa đền nhà thờ thiên nhiên resort vườn hoa đô thị"
+    keywords:
+      - {term: landscape, weight: 8}
+      - {term: mountain, weight: 8}
+      - {term: beach, weight: 8}
+      - {term: sunset, weight: 8}
+      - {term: sunrise, weight: 8}
+      - {term: ocean, weight: 8}
+      - {term: sea, weight: 7}
+      - {term: nature, weight: 7}
+      - {term: scenery, weight: 8}
+      - {term: altar, weight: 9}
+      - {term: temple, weight: 9}
+      - {term: pagoda, weight: 9}
+      - {term: church, weight: 9}
+      - {term: prayer, weight: 8}
+      - {term: worship, weight: 8}
+      - {term: biển, weight: 8}
+      - {term: bãi biển, weight: 9}
+      - {term: biển cả, weight: 9}
+      - {term: mặt nước, weight: 7}
+      - {term: núi, weight: 8}
+      - {term: núi bà đen, weight: 9}
+      - {term: tây ninh, weight: 8}
+      - {term: hoàng hôn, weight: 8}
+      - {term: bình minh, weight: 8}
+      - {term: phong cảnh, weight: 8}
+      - {term: cảnh vật, weight: 8}
+      - {term: thiên nhiên, weight: 8}
+      - {term: du lịch, weight: 7}
+      - {term: travel, weight: 7}
+      - {term: outdoors, weight: 7}
+      - {term: ngoài trời, weight: 7}
+      - {term: cây cối, weight: 7}
+      - {term: cây xanh, weight: 7}
+      - {term: thảm thực vật, weight: 7}
+      - {term: chùa, weight: 9}
+      - {term: đền, weight: 9}
+      - {term: nhà thờ, weight: 9}
+      - {term: bàn thờ, weight: 9}
+      - {term: resort, weight: 8}
+      - {term: hotel, weight: 7}
+      - {term: garden, weight: 7}
+      - {term: nhà vườn, weight: 7}
+      - {term: vườn hoa, weight: 8}
+      - {term: hoa tươi, weight: 7}
+      - {term: bình hoa, weight: 7}
+      - {term: đô thị, weight: 7}
+      - {term: urban, weight: 7}
+  videos:
+    label: "Video & Kỷ niệm"
+    description: "video clip mp4 kỷ niệm thuyết trình"
+    keywords: []
+  other:
+    label: "Khác"
+    description: "bàn làm việc dây cáp hộp sản phẩm đồ vật linh tinh không phải bài giảng không phải thú cưng"
+    keywords: []
+
+subjects:
+  math:
+    label: "Toán"
+    major: true
+    description: "toán giải tích tích phân đạo hàm đại số xác suất calculus algebra integral"
+    keywords:
+      - {term: toán, weight: 8}
+      - {term: giải tích, weight: 8}
+      - {term: tích phân, weight: 8}
+      - {term: đạo hàm, weight: 8}
+      - {term: đại số, weight: 7}
+      - {term: xác suất, weight: 7}
+      - {term: integral, weight: 7}
+      - {term: derivative, weight: 7}
+      - {term: calculus, weight: 7}
+      - {term: algebra, weight: 6}
+      - {term: equation, weight: 5}
+      - {term: ma trận, weight: 7}
+      - {term: quy hoạch tuyến tính, weight: 8}
+      - {term: qhtt, weight: 7}
+  os:
+    label: "Hệ điều hành"
+    major: true
+    description: "hệ điều hành operating system round robin virtual memory page fault deadlock scheduler paging"
+    keywords:
+      - {term: hệ điều hành, weight: 8}
+      - {term: operating system, weight: 8}
+      - {term: round robin, weight: 9}
+      - {term: virtual memory, weight: 9}
+      - {term: page fault, weight: 9}
+      - {term: scheduler, weight: 7}
+      - {term: deadlock, weight: 8}
+      - {term: cpu scheduling, weight: 8}
+      - {term: paging, weight: 7}
+  networks:
+    label: "Mạng máy tính"
+    major: true
+    description: "mạng máy tính computer network TCP UDP OSI routing DNS IP"
+    keywords:
+      - {term: mạng máy tính, weight: 8}
+      - {term: computer network, weight: 8}
+      - {term: tcp, weight: 7}
+      - {term: udp, weight: 6}
+      - {term: osi, weight: 7}
+      - {term: ip address, weight: 7}
+      - {term: routing, weight: 6}
+      - {term: dns, weight: 6}
+  programming:
+    label: "Lập trình"
+    major: true
+    description: "lập trình python java thuật toán algorithm OOP code function class"
+    keywords:
+      - {term: lập trình, weight: 8}
+      - {term: python, weight: 8}
+      - {term: java, weight: 7}
+      - {term: javascript, weight: 8}
+      - {term: c++, weight: 8}
+      - {term: source code, weight: 8}
+      - {term: function, weight: 6}
+      - {term: class, weight: 6}
+      - {term: thuật toán, weight: 8}
+      - {term: algorithm, weight: 8}
+      - {term: oop, weight: 7}
+  database:
+    label: "Cơ sở dữ liệu"
+    major: true
+    description: "cơ sở dữ liệu SQL CSDL database ERD"
+    keywords:
+      - {term: cơ sở dữ liệu, weight: 8}
+      - {term: sql, weight: 8}
+      - {term: csdl, weight: 8}
+      - {term: database, weight: 8}
+      - {term: erd, weight: 7}
+  cloud:
+    label: "Điện toán đám mây"
+    major: true
+    description: "AWS Amazon S3 Lambda DynamoDB Bedrock Rekognition Transcribe serverless cloud API Gateway"
+    keywords:
+      - {term: aws, weight: 8}
+      - {term: amazon s3, weight: 8}
+      - {term: lambda, weight: 7}
+      - {term: dynamodb, weight: 8}
+      - {term: bedrock, weight: 8}
+      - {term: rekognition, weight: 7}
+      - {term: transcribe, weight: 7}
+      - {term: serverless, weight: 8}
+      - {term: cloud, weight: 6}
+      - {term: api gateway, weight: 7}
+  automation:
+    label: "Tự động hóa & Kỹ thuật"
+    major: true
+    description: "PLC Siemens Mitsubishi Omron bộ đếm counter tự động hóa vi điều khiển scada cảm biến relay mạch điện"
+    keywords:
+      - {term: plc, weight: 9}
+      - {term: siemens, weight: 8}
+      - {term: mitsubishi, weight: 8}
+      - {term: omron, weight: 8}
+      - {term: bộ đếm, weight: 8}
+      - {term: counter, weight: 8}
+      - {term: tự động hóa, weight: 9}
+      - {term: vi điều khiển, weight: 8}
+      - {term: scada, weight: 8}
+      - {term: cảm biến, weight: 7}
+      - {term: relay, weight: 7}
+      - {term: mạch điện, weight: 7}
+  ai_ml:
+    label: "Trí tuệ nhân tạo & AI/ML"
+    major: true
+    description: "AI Machine Learning Deep Learning PyTorch TensorFlow CNN RNN Transformer neural network"
+    keywords:
+      - {term: trí tuệ nhân tạo, weight: 9}
+      - {term: machine learning, weight: 9}
+      - {term: deep learning, weight: 9}
+      - {term: học máy, weight: 8}
+      - {term: pytorch, weight: 9}
+      - {term: tensorflow, weight: 9}
+      - {term: transformer, weight: 8}
+      - {term: cnn, weight: 8}
+      - {term: rnn, weight: 8}
+      - {term: neural network, weight: 8}
+      - {term: mạng nơ ron, weight: 8}
+      - {term: gradient descent, weight: 8}
+      - {term: computer vision, weight: 8}
+      - {term: thị giác máy tính, weight: 8}
+      - {term: nlp, weight: 7}
+  security:
+    label: "An toàn thông tin & Bảo mật"
+    major: true
+    description: "An toàn thông tin Cryptography RSA AES Firewall Malware XSS SQLi Penetration Testing PKI"
+    keywords:
+      - {term: an toàn thông tin, weight: 9}
+      - {term: bảo mật, weight: 8}
+      - {term: cryptography, weight: 9}
+      - {term: mật mã học, weight: 8}
+      - {term: rsa, weight: 8}
+      - {term: aes, weight: 8}
+      - {term: firewall, weight: 8}
+      - {term: malware, weight: 8}
+      - {term: xss, weight: 8}
+      - {term: sql injection, weight: 8}
+      - {term: penetration testing, weight: 8}
+      - {term: chữ ký số, weight: 8}
+      - {term: pki, weight: 7}
+  software_eng:
+    label: "Công nghệ phần mềm"
+    major: true
+    description: "Công nghệ phần mềm Design Pattern UML Use Case Agile Scrum CI/CD Unit Test"
+    keywords:
+      - {term: công nghệ phần mềm, weight: 9}
+      - {term: software engineering, weight: 9}
+      - {term: design pattern, weight: 9}
+      - {term: uml, weight: 8}
+      - {term: use case, weight: 8}
+      - {term: agile, weight: 8}
+      - {term: scrum, weight: 8}
+      - {term: ci/cd, weight: 8}
+      - {term: unit test, weight: 8}
+      - {term: kiểm thử phần mềm, weight: 8}
+  lecture:
+    label: "Bài giảng chung & Đồ án"
+    major: true
+    description: "bài giảng chung whiteboard classroom bảng đen slide giảng đường đồ án bảo vệ thuyết trình"
+    keywords:
+      - {term: bài giảng, weight: 8}
+      - {term: đồ án, weight: 8}
+      - {term: thuyết trình, weight: 8}
+      - {term: trình bày, weight: 7}
+      - {term: bảo vệ, weight: 8}
+      - {term: bảo vệ tốt nghiệp, weight: 9}
+      - {term: chuẩn đầu ra, weight: 8}
+      - {term: giảng đường, weight: 7}
+      - {term: thi lý thuyết, weight: 8}
+      - {term: nộp đồ án, weight: 8}
+      - {term: kế hoạch học tập, weight: 8}
+      - {term: tiểu luận, weight: 7}
+      - {term: demo, weight: 6}
+      - {term: proof of concept, weight: 8}
+      - {term: đề tài, weight: 7}
+  english:
+    label: "Tiếng Anh"
+    off_major: true
+    description: "tiếng anh IELTS TOEIC grammar vocabulary reading comprehension English"
+    keywords:
+      - {term: tiếng anh, weight: 9}
+      - {term: english, weight: 8}
+      - {term: ielts, weight: 9}
+      - {term: toeic, weight: 9}
+      - {term: grammar, weight: 7}
+      - {term: vocabulary, weight: 7}
+      - {term: reading comprehension, weight: 8}
+      - {term: chuyên ngành anh, weight: 8}
+  physics:
+    label: "Vật lý"
+    off_major: true
+    description: "vật lý physics cơ học quang học điện từ Newton"
+    keywords:
+      - {term: vật lý, weight: 9}
+      - {term: physics, weight: 8}
+      - {term: cơ học, weight: 7}
+      - {term: quang học, weight: 8}
+      - {term: điện từ, weight: 7}
+      - {term: newton, weight: 6}
+  chemistry:
+    label: "Hóa học"
+    off_major: true
+    description: "hóa học chemistry phản ứng hóa hữu cơ nguyên tử"
+    keywords:
+      - {term: hóa học, weight: 9}
+      - {term: chemistry, weight: 8}
+      - {term: phản ứng hóa, weight: 8}
+      - {term: nguyên tử, weight: 6}
+      - {term: hóa hữu cơ, weight: 8}
+  biology:
+    label: "Sinh học"
+    off_major: true
+    description: "sinh học biology tế bào ADN DNA"
+    keywords:
+      - {term: sinh học, weight: 9}
+      - {term: biology, weight: 8}
+      - {term: tế bào, weight: 7}
+      - {term: adn, weight: 7}
+      - {term: dna, weight: 6}
+      - {term: acgt, weight: 8}
+      - {term: nucleotide, weight: 7}
+      - {term: gene, weight: 6}
+  economics:
+    label: "Kinh tế"
+    off_major: true
+    description: "kinh tế economics vi mô vĩ mô marketing kế toán"
+    keywords:
+      - {term: kinh tế, weight: 8}
+      - {term: economics, weight: 8}
+      - {term: vi mô, weight: 7}
+      - {term: vĩ mô, weight: 7}
+      - {term: marketing, weight: 7}
+      - {term: kế toán, weight: 7}
+  law:
+    label: "Pháp luật"
+    off_major: true
+    description: "pháp luật luật dân sự hiến pháp pháp chế"
+    keywords:
+      - {term: pháp luật, weight: 9}
+      - {term: luật dân sự, weight: 8}
+      - {term: hiến pháp, weight: 8}
+      - {term: pháp chế, weight: 7}
+  philosophy:
+    label: "Lý luận chính trị"
+    off_major: true
+    description: "triết học tư tưởng Hồ Chí Minh Mác Lênin chính trị"
+    keywords:
+      - {term: triết học, weight: 9}
+      - {term: tư tưởng hồ chí minh, weight: 9}
+      - {term: mac-lenin, weight: 8}
+      - {term: mác lê-nin, weight: 8}
+      - {term: chính trị, weight: 6}
+  pe:
+    label: "GDTC / Quốc phòng"
+    off_major: true
+    description: "giáo dục thể chất thể dục GDTC giáo dục quốc phòng GDQP"
+    keywords:
+      - {term: giáo dục thể chất, weight: 9}
+      - {term: thể dục, weight: 7}
+      - {term: gdtc, weight: 8}
+      - {term: giáo dục quốc phòng, weight: 9}
+      - {term: gdqp, weight: 8}
+  off_major:
+    label: "Ngoài ngành"
+    off_major: true
+    description: "môn ngoài ngành môn tự chọn kỹ năng mềm đại cương môn phụ"
+    keywords:
+      - {term: ngoài ngành, weight: 9}
+      - {term: môn tự chọn, weight: 8}
+      - {term: kỹ năng mềm, weight: 8}
+      - {term: đại cương, weight: 6}
+      - {term: môn phụ, weight: 7}
+
+lecture_hints:
+  - whiteboard
+  - white board
+  - blackboard
+  - classroom
+  - lecture
+  - slide
+  - bảng
+  - bảng viết
+  - giảng đường
+  - bài giảng
+  - bài tập
+  - đề thi
+  - notebook
+  - văn bản
+  - phương trình
+
+ocr_noise_brands:
+  - redmi
+  - xiaomi
+  - shaver
+  - iphone
+  - samsung
+  - oppo
+  - vivo
+  - whis
+  - huawei
+  - realme
+
+thresholds:
+  category_lock: 12
+  category_min: 4
+  subject_lock: 12
+  subject_min: 6
+  vector_min_cosine: 0.55

@@ -1,11 +1,15 @@
+"""FastAPI route endpoints for media uploads, processing, queries, and catalog management."""
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+
+from botocore.exceptions import ClientError
 
 from apps.agent.search import execute_search
 from apps.api.auth import verify_api_key
@@ -19,12 +23,19 @@ from apps.api.schemas import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
-from apps.aws.memory import MemoryObjectStore
 from apps.aws.providers import get_runtime
-from apps.domain import CATEGORY_LABELS, MediaRecord, ingest_pipeline
+from apps.domain import (
+    CATEGORY_LABELS,
+    SUBJECT_LABELS,
+    MediaRecord,
+    infer_media_type,
+    ingest_pipeline,
+    resolve_subject,
+)
 from apps.workers.ingestion import ingest_object
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _human_size(size_bytes: int) -> str:
@@ -39,29 +50,48 @@ def _human_size(size_bytes: int) -> str:
     return f"{size_bytes} B"
 
 
+def _presign(object_key: str) -> str:
+    if not object_key:
+        return ""
+    try:
+        return get_runtime().store.presign_get(object_key)
+    except Exception:
+        return ""
+
+
+def _purge_objects(record: MediaRecord) -> None:
+    store = get_runtime().store
+    for key in (record.s3_key, record.thumb_key):
+        if not key:
+            continue
+        try:
+            store.delete_object(key)
+        except Exception as exc:
+            logger.warning("s3 delete skipped key=%s: %s", key, exc)
+
+
 def to_item_out(
     record: MediaRecord,
     score: float | None = None,
     matched_on: list[str] | None = None,
     matched_fields: list[str] | None = None,
+    *,
+    include_original: bool = False,
 ) -> MediaItemOut:
-    runtime = get_runtime()
-    url = record.preview_url or ""
-    if not url and record.s3_key:
-        try:
-            url = runtime.store.presign_get(record.s3_key)
-        except Exception:
-            url = ""
+    thumb = _presign(record.thumb_key or "")
+    original = _presign(record.s3_key) if include_original else thumb
+    subject = record.subject or resolve_subject(record)
+    category = record.category
     return MediaItemOut(
         id=record.file_id,
         filename=record.filename,
         type=record.media_type,
-        url=url,
-        thumbnailUrl=record.preview_url,
+        url=original or thumb,
+        thumbnailUrl=thumb or None,
         size=_human_size(record.size_bytes),
         date=record.created_at.replace("T", " ")[:16],
-        category=record.category,
-        categoryLabel=CATEGORY_LABELS.get(record.category, record.category),
+        category=category,
+        categoryLabel=CATEGORY_LABELS.get(category, category),
         labels=record.labels,
         ocrText=record.ocr_text,
         transcript=record.transcript,
@@ -72,7 +102,11 @@ def to_item_out(
         score=score,
         matchedOn=matched_on or [],
         matchedFields=matched_fields or [],
-        pipeline=ingest_pipeline(record.media_type),
+        pipeline=ingest_pipeline(record.media_type, record.analysis_source),
+        error=record.error,
+        analysisSource=record.analysis_source,
+        subject=subject,
+        subjectLabel=SUBJECT_LABELS.get(subject, ""),
     )
 
 
@@ -92,50 +126,69 @@ def generate_upload_url(payload: UploadUrlRequest):
     return UploadUrlResponse(file_id=file_id, presigned_url=url, object_key=object_key)
 
 
-@router.put("/local-upload/{object_key:path}")
-async def local_upload(object_key: str, request: Request, content_type: str = "application/octet-stream"):
-    runtime = get_runtime()
-    if not isinstance(runtime.store, MemoryObjectStore):
-        raise HTTPException(status_code=404, detail="Local upload is only available in memory mode")
-    body = await request.body()
-    runtime.store.put_bytes(object_key, body, content_type)
-    return {"ok": True, "bytes": len(body)}
-
-
-@router.get("/local-object/{object_key:path}")
-def local_object(object_key: str):
-    runtime = get_runtime()
-    if not isinstance(runtime.store, MemoryObjectStore):
-        raise HTTPException(status_code=404, detail="Not found")
-    payload = runtime.store.get_object(object_key)
-    if not payload:
-        raise HTTPException(status_code=404, detail="Object not found")
-    body, content_type = payload
-    from fastapi.responses import Response
-
-    return Response(content=body, media_type=content_type)
+def _run_ingest_background(file_id: str, object_key: str, filename: str | None, content_type: str) -> None:
+    """Chạy ingest ở nền: ingest_object tự ghi trạng thái READY/FAILED vào catalog."""
+    try:
+        ingest_object(
+            file_id=file_id,
+            object_key=object_key,
+            filename=filename,
+            content_type=content_type,
+        )
+    except Exception:
+        # ingest_object đã đánh dấu record FAILED và log; nuốt exception để không làm ồn background task
+        pass
 
 
 @router.post("/process", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
-def trigger_media_processing(payload: ProcessRequest):
+def trigger_media_processing(payload: ProcessRequest, background_tasks: BackgroundTasks):
+    """Nhận yêu cầu xử lý và trả về ngay; phân tích chạy nền, client theo dõi qua /status."""
     object_key = payload.object_key or f"uploads/{payload.file_id}"
-    try:
-        record = ingest_object(
-            file_id=payload.file_id,
-            object_key=object_key,
-            filename=payload.filename,
-            content_type=payload.content_type,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion failed: {exc}",
-        ) from exc
+    name = payload.filename or os.path.basename(object_key)
+    runtime = get_runtime()
+    stub = MediaRecord(
+        file_id=payload.file_id,
+        filename=name,
+        s3_key=object_key,
+        media_type=infer_media_type(name, payload.content_type),
+        content_type=payload.content_type or "application/octet-stream",
+        status="INDEXING",
+        source="pipeline",
+    )
+    runtime.catalog.put(stub)
+    # NOTE: BackgroundTasks runs asynchronously in local/container environments.
+    # In AWS Lambda, execution freezes immediately after the HTTP response is returned,
+    # meaning BackgroundTasks may not complete reliably. For production AWS environments,
+    # consider queueing ingestion jobs via Amazon SQS with a dedicated worker Lambda.
+    background_tasks.add_task(
+        _run_ingest_background, payload.file_id, object_key, payload.filename, payload.content_type
+    )
     return {
-        "message": "Media indexing completed",
-        "file_id": record.file_id,
-        "status": record.status,
+        "message": "Media indexing started",
+        "file_id": payload.file_id,
+        "status": "INDEXING",
+        "error": None,
     }
+
+
+@router.post("/reprocess/{file_id}", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
+def reprocess_item(file_id: str, background_tasks: BackgroundTasks):
+    """Phân tích lại một tệp đã FAILED (hoặc muốn chạy lại) từ chính object S3 đã lưu."""
+    runtime = get_runtime()
+    record = runtime.catalog.get(file_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File ID not found")
+    if not record.s3_key:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Record has no S3 object to reprocess")
+    record.status = "INDEXING"
+    record.error = None
+    runtime.catalog.put(record)
+    # NOTE: BackgroundTasks execution may not complete in AWS Lambda because the runtime
+    # freezes after sending the response. Suggest using Amazon SQS for production workloads.
+    background_tasks.add_task(
+        _run_ingest_background, record.file_id, record.s3_key, record.filename, record.content_type
+    )
+    return {"file_id": record.file_id, "status": "INDEXING", "error": None}
 
 
 def make_file_id(filename: str, body: bytes) -> str:
@@ -151,7 +204,9 @@ async def upload_and_ingest(file: UploadFile = File(...)):
     body = await file.read()
     file_id = make_file_id(file.filename or "upload.bin", body)
     ext = os.path.splitext(file.filename or "upload.bin")[1]
-    object_key = f"uploads/{file_id}{ext}"
+    # Use 'direct/' prefix to avoid triggering S3→SQS→Lambda duplicate ingestion.
+    # The SQS event source filter only listens for 'uploads/' prefix (presigned PUT).
+    object_key = f"direct/{file_id}{ext}"
     runtime.store.put_bytes(object_key, body, file.content_type or "application/octet-stream")
     record = ingest_object(
         file_id=file_id,
@@ -161,7 +216,7 @@ async def upload_and_ingest(file: UploadFile = File(...)):
     )
     record.size_bytes = len(body)
     runtime.catalog.put(record)
-    return to_item_out(record)
+    return to_item_out(record, include_original=True)
 
 
 @router.post("/upload-batch", response_model=list[MediaItemOut], dependencies=[Depends(verify_api_key)])
@@ -172,7 +227,7 @@ async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
         body = await file.read()
         file_id = make_file_id(file.filename or "upload.bin", body)
         ext = os.path.splitext(file.filename or "upload.bin")[1]
-        object_key = f"uploads/{file_id}{ext}"
+        object_key = f"direct/{file_id}{ext}"
         runtime.store.put_bytes(object_key, body, file.content_type or "application/octet-stream")
         record = ingest_object(
             file_id=file_id,
@@ -182,7 +237,7 @@ async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
         )
         record.size_bytes = len(body)
         runtime.catalog.put(record)
-        results.append(to_item_out(record))
+        results.append(to_item_out(record, include_original=True))
     return results
 
 
@@ -194,11 +249,36 @@ def check_media_status(file_id: str):
     return StatusResponse(file_id=file_id, status=record.status, error=record.error)
 
 
+def _list_records():
+    try:
+        records = get_runtime().catalog.list_all()
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if "ResourceNotFound" in code:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Catalog DynamoDB chưa có. Cần sam deploy stack agentsys rồi sửa MEDIA_BUCKET trong .env.",
+            ) from exc
+        raise
+    records.sort(key=lambda item: item.created_at, reverse=True)
+    return records
+
+
 @router.get("/items", response_model=list[MediaItemOut], dependencies=[Depends(verify_api_key)])
 def list_items():
-    records = get_runtime().catalog.list_all()
-    records.sort(key=lambda item: item.created_at, reverse=True)
-    return [to_item_out(item) for item in records]
+    return [to_item_out(item) for item in _list_records()]
+
+
+@router.get("/items/{file_id}/url", dependencies=[Depends(verify_api_key)])
+def item_content_url(file_id: str):
+    record = get_runtime().catalog.get(file_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="File ID not found")
+    return {
+        "id": file_id,
+        "url": _presign(record.s3_key),
+        "thumbnailUrl": _presign(record.thumb_key or ""),
+    }
 
 
 @router.post("/agent/query", response_model=AgentQueryResponse, dependencies=[Depends(verify_api_key)])
@@ -221,13 +301,19 @@ def process_agent_query(request: Request, payload: AgentQueryRequest):
 
 @router.delete("/clear", dependencies=[Depends(verify_api_key)])
 def clear_all_items():
-    get_runtime().catalog.clear()
+    runtime = get_runtime()
+    for record in runtime.catalog.list_all():
+        _purge_objects(record)
+    runtime.catalog.clear()
     return {"message": "All media items cleared successfully"}
 
 
 @router.delete("/{file_id}", dependencies=[Depends(verify_api_key)])
 def delete_item(file_id: str):
-    success = get_runtime().catalog.delete(file_id)
-    if not success:
+    runtime = get_runtime()
+    record = runtime.catalog.get(file_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="File ID not found")
+    _purge_objects(record)
+    runtime.catalog.delete(file_id)
     return {"message": "Deleted successfully", "file_id": file_id}

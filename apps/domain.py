@@ -1,13 +1,20 @@
+"""Domain models and core taxonomy helpers for media records, search plans, and pipelines."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import hashlib
-import os
+import mimetypes
 import re
 from typing import List, Literal, Optional
-import unicodedata
 
 from pydantic import BaseModel, Field, field_validator
+
+from apps.classify.taxonomy import (
+    CATEGORY_LABELS,
+    OCR_NOISE_BRANDS,
+    OFF_MAJOR_SUBJECTS,
+    SUBJECT_LABELS,
+)
+from apps.classify.text import fold_text
 
 MediaType = Literal["image", "audio", "video", "other"]
 IngestStatus = Literal["INDEXING", "READY", "FAILED"]
@@ -43,26 +50,39 @@ class MediaRecord(BaseModel):
     preview_url: Optional[str] = None
     source: str = "pipeline"
     embedding: Optional[List[float]] = None
+    transcribe_job_name: Optional[str] = None
+    analysis_source: str = ""
+    subject: str = "none"
+    thumb_key: Optional[str] = None
 
     @field_validator("size_bytes", mode="before")
     @classmethod
     def coerce_size(cls, value):
         if value is None:
             return 0
-        return int(value)
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
 
 
 class SearchPlan(BaseModel):
     keywords: List[str] = Field(default_factory=list)
     media_type: Optional[MediaType] = None
     category: Optional[SmartCategory] = None
+    subject: Optional[str] = None
     rationale: str = ""
     vector_query: Optional[List[float]] = None
+    planner_source: str = "heuristic"
+    embedding_source: str = "off"
+    direct_answer: Optional[str] = None
+    evidence_snippet: Optional[str] = None
+    source_file: Optional[str] = None
 
-    @field_validator("media_type", "category", mode="before")
+    @field_validator("media_type", "category", "subject", mode="before")
     @classmethod
     def blank_to_none(cls, value):
-        if value == "" or value == "null":
+        if value == "" or value == "null" or value == "none":
             return None
         return value
 
@@ -75,139 +95,154 @@ class SearchHit(BaseModel):
     matched_fields: List[str] = Field(default_factory=list)
 
 
-def ingest_pipeline(media_type: MediaType) -> List[str]:
-    prefix = ["S3 PutObject", "SQS ingest queue"]
+def ingest_pipeline(media_type: MediaType, analysis_source: str = "") -> List[str]:
+    """Return the sequence of ingestion pipeline step descriptions for a media item."""
+    steps = ["S3 PutObject"]
+    source = (analysis_source or "").lower()
     if media_type == "image":
-        return prefix + ["Rekognition DetectLabels", "Rekognition DetectText", "DynamoDB PutItem"]
-    if media_type in {"audio", "video"}:
-        return prefix + ["Amazon Transcribe vi-VN", "DynamoDB PutItem"]
-    return prefix + ["DynamoDB PutItem"]
+        if "rekognition" in source:
+            steps += ["Rekognition DetectLabels", "Rekognition DetectText"]
+        else:
+            steps += ["Vision (Rekognition unavailable)"]
+    elif media_type in {"audio", "video"}:
+        if "transcribe" in source:
+            steps += ["Amazon Transcribe vi-VN"]
+        elif "indexing" in source:
+            steps += ["Amazon Transcribe (waiting)"]
+        else:
+            steps += ["Speech (Transcribe unavailable)"]
+    steps.append("DynamoDB PutItem")
+    return steps
 
 
-def infer_media_type(filename: str, content_type: str) -> MediaType:
-    name = filename.lower()
+EXTENSION_OVERRIDES = {
+    ".webp": "image",
+    ".gif": "image",
+    ".flac": "audio",
+    ".m4a": "audio",
+    ".mkv": "video",
+    ".mov": "video",
+}
+
+for _ext, _mime in (
+    (".webp", "image/webp"),
+    (".gif", "image/gif"),
+    (".flac", "audio/flac"),
+    (".m4a", "audio/mp4"),
+    (".mkv", "video/x-matroska"),
+    (".mov", "video/quicktime"),
+):
+    mimetypes.add_type(_mime, _ext)
+
+
+def infer_media_type(filename: str, content_type: str = "") -> MediaType:
+    """Infer media type (image, audio, video, or other) from MIME type or file extension."""
     ctype = (content_type or "").lower()
-    if ctype.startswith("image/") or name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
-        return "image"
-    if ctype.startswith("audio/") or name.endswith((".mp3", ".wav", ".m4a", ".flac")):
-        return "audio"
-    if ctype.startswith("video/") or name.endswith((".mp4", ".mov", ".avi", ".mkv")):
-        return "video"
-    return "other"
+    if "/" in ctype:
+        main_type = ctype.split("/", 1)[0]
+        if main_type in {"image", "audio", "video"}:
+            return main_type  # type: ignore[return-value]
+
+    guessed_type, _ = mimetypes.guess_type(filename or "")
+    if guessed_type:
+        main_type = guessed_type.split("/", 1)[0]
+        if main_type in {"image", "audio", "video"}:
+            return main_type  # type: ignore[return-value]
+
+    ext = ""
+    if filename and "." in filename:
+        ext = "." + filename.rsplit(".", 1)[-1].lower()
+    return EXTENSION_OVERRIDES.get(ext, "other")  # type: ignore[return-value]
 
 
-CATEGORY_KEYWORDS: dict[SmartCategory, tuple[tuple[str, int], ...]] = {
-    "study": (
-        ("computer", 6), ("laptop", 6), ("pc", 6), ("monitor", 6), ("screen", 5),
-        ("electronics", 5), ("desk", 5), ("keyboard", 5), ("mouse", 4), ("shelf", 4),
-        ("bookcase", 4), ("books", 5), ("notebook", 5), ("whiteboard", 6),
-        ("blackboard", 6), ("lecture", 6), ("slide", 5), ("toán", 6),
-        ("bài tập", 6), ("giảng đường", 6), ("giải tích", 6), ("aws", 5),
-        ("code", 5), ("document", 4), ("paper", 4), ("school", 5),
-        ("student", 5), ("university", 5), ("máy tính", 6), ("bàn học", 6),
-        ("bàn làm việc", 6), ("bảng", 5), ("học", 5), ("sách", 5),
-        ("book", 5), ("diagram", 5), ("screenshot", 4),
-    ),
-    "receipts": (
-        ("receipt", 6), ("invoice", 6), ("hóa đơn", 6), ("biên lai", 6), ("bill", 5),
-        ("vat", 5), ("phiếu", 4), ("vnd", 5), ("tổng tiền", 6), ("thanh toán", 5),
-        ("payment", 5), ("cash", 4), ("tax", 4), ("total", 4), ("tiền", 3),
-    ),
-    "pets": (
-        ("pet", 6), ("dog", 6), ("cat", 6), ("canine", 6), ("feline", 6),
-        ("tiger", 6), ("lion", 6), ("bird", 6), ("chó", 6), ("mèo", 6),
-        ("thú cưng", 6), ("động vật", 5), ("hổ", 6), ("báo", 6), ("chim", 5),
-        ("fish", 5), ("cá", 5), ("animal", 4), ("mammal", 4), ("wildlife", 5),
-        ("zoo", 4), ("fauna", 4),
-    ),
-    "people": (
-        ("person", 5), ("human", 5), ("face", 5), ("portrait", 6), ("athlete", 6),
-        ("player", 5), ("soccer", 5), ("football", 5), ("sport", 4), ("man", 4),
-        ("woman", 4), ("boy", 4), ("girl", 4), ("crowd", 4), ("people", 5),
-        ("celebrity", 6), ("ronaldo", 6), ("người", 5), ("cầu thủ", 6),
-        ("chân dung", 6), ("khuôn mặt", 5), ("selfie", 6),
-    ),
-    "food": (
-        ("food", 6), ("dish", 6), ("meal", 6), ("drink", 5), ("beverage", 5),
-        ("coffee", 6), ("tea", 5), ("burger", 6), ("pizza", 6), ("restaurant", 5),
-        ("cà phê", 6), ("món ăn", 6), ("đồ ăn", 6), ("ẩm thực", 6), ("trà sữa", 6),
-        ("bánh", 4), ("nước uống", 5),
-    ),
-    "scenes": (
-        ("landscape", 6), ("mountain", 6), ("beach", 6), ("sunset", 6),
-        ("sunrise", 6), ("ocean", 6), ("sea", 5), ("nature", 4),
-        ("city", 5), ("building", 4), ("street", 4), ("biển", 6), ("núi", 6),
-        ("hoàng hôn", 6), ("phố", 4), ("phong cảnh", 6), ("du lịch", 5),
-        ("travel", 5), ("outdoors", 4), ("architecture", 4),
-    ),
-}
+def infer_category(media_type: MediaType, labels: List[str], text: str, bedrock_client=None) -> SmartCategory:
+    """Infer high-level taxonomy category using classification rules or Bedrock LLM."""
+    from apps.classify.engine import infer_category as classify_category
+
+    return classify_category(media_type, labels, text, bedrock_client=bedrock_client)  # type: ignore[return-value]
 
 
-def _matches_keyword(kw: str, raw_blob: str, folded_blob: str) -> bool:
-    """Exact whole-word or phrase matching to prevent false substring matches (e.g. 'man' in 'command')."""
-    kw_clean = kw.strip().lower()
-    folded_kw = fold_text(kw_clean)
-    if " " in kw_clean:
-        return kw_clean in raw_blob or folded_kw in folded_blob
-    pattern = rf"\b{re.escape(folded_kw)}\b"
-    return bool(re.search(pattern, folded_blob, re.IGNORECASE))
+def infer_subject(
+    labels: List[str],
+    ocr_text: str,
+    transcript: str,
+    filename: str = "",
+    bedrock_client=None,
+) -> str:
+    """Infer academic subject classification from labels, OCR text, transcript, and filename."""
+    from apps.classify.engine import infer_subject as classify_subject
+
+    return classify_subject(labels, ocr_text, transcript, filename, bedrock_client=bedrock_client)
 
 
-def infer_category(media_type: MediaType, labels: List[str], text: str) -> SmartCategory:
-    if media_type == "video":
-        return "videos"
-    if media_type == "audio":
-        return "study"
-
-    # Prioritize Rekognition Vision labels first (they are cleaner than OCR noise)
-    labels_text = " ".join(labels).lower()
-    folded_labels = fold_text(labels_text)
-
-    # Full blob including OCR
-    full_blob = f"{labels_text} {text}".lower()
-    folded_full = fold_text(full_blob)
-
-    scores: dict[SmartCategory, int] = {cat: 0 for cat in CATEGORY_KEYWORDS}
-
-    for category, kw_weights in CATEGORY_KEYWORDS.items():
-        for kw, weight in kw_weights:
-            # Matches in labels get 1.5x weight because visual labels are high confidence
-            if _matches_keyword(kw, labels_text, folded_labels):
-                scores[category] += int(weight * 1.5)
-            elif _matches_keyword(kw, full_blob, folded_full):
-                scores[category] += weight
-
-    best_cat, best_score = max(scores.items(), key=lambda x: x[1])
-    if best_score >= 4:
-        return best_cat
-    return "other"
+def is_off_major_subject(subject: str) -> bool:
+    return (subject or "") in OFF_MAJOR_SUBJECTS
 
 
-CATEGORY_LABELS = {
-    "study": "Học tập & Giảng đường",
-    "pets": "Thú cưng & Động vật",
-    "people": "Con người & Chân dung",
-    "food": "Ẩm thực & Đồ uống",
-    "receipts": "Hóa đơn & Biên lai",
-    "scenes": "Cảnh quan & Du lịch",
-    "videos": "Video & Kỷ niệm",
-    "other": "Khác",
-}
+def matches_subject_filter(record: MediaRecord, subject: Optional[str]) -> bool:
+    if not subject:
+        return True
+    resolved = resolve_subject(record)
+    if subject == "off_major":
+        return is_off_major_subject(resolved)
+    return resolved == subject
 
 
-def fold_text(value: str) -> str:
-    """Lowercase and strip Vietnamese diacritics so 'cho' matches 'chó'."""
-    normalized = unicodedata.normalize("NFD", value or "")
-    stripped = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
-    return stripped.lower()
+def is_noise_ocr_line(line: str) -> bool:
+    """Check if an OCR text line is noise, brand artifact, or non-text garbage."""
+    text = (line or "").strip()
+    if len(text) < 4 or text.isdigit() or text.lower().startswith("http"):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9]{3,10}", text) and any(ch.isdigit() for ch in text):
+        return True
+    folded = fold_text(text)
+    if folded in OCR_NOISE_BRANDS or any(brand in folded.split() for brand in OCR_NOISE_BRANDS):
+        return True
+    letters = sum(ch.isalpha() for ch in text)
+    return letters < 3
+
+
+def usable_ocr_text(ocr_text: str) -> str:
+    """Filter raw OCR output to remove noisy lines and retain only meaningful text."""
+    kept: list[str] = []
+    for raw in (ocr_text or "").replace(",", "\n").splitlines():
+        line = raw.strip()
+        if line and not is_noise_ocr_line(line):
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def has_lecture_context(record: MediaRecord) -> bool:
+    """Determine whether a media record contains signals indicating academic lecture content."""
+    from apps.classify.engine import has_lecture_signal
+
+    return has_lecture_signal([*record.labels, record.ocr_text or "", record.transcript or "", record.filename])
+
+
+def resolve_subject(record: MediaRecord) -> str:
+    """Resolve and normalize the academic subject for a media record with fallback heuristics."""
+    current = (record.subject or "none").strip()
+    guessed = infer_subject(record.labels, record.ocr_text, record.transcript, record.filename)
+    if guessed != "none":
+        return guessed
+    if current not in {"", "none", "lecture"}:
+        return current
+    if record.media_type == "audio" or has_lecture_context(record):
+        return "lecture"
+    return "none"
 
 
 def record_haystack(record: MediaRecord) -> str:
+    """Build a consolidated, accent-folded search text string from all record fields."""
+    subject = resolve_subject(record)
     parts = [
         record.filename,
         record.media_type,
         record.category,
         CATEGORY_LABELS.get(record.category, record.category),
+        subject,
+        SUBJECT_LABELS.get(subject, subject),
+        "ngoài ngành" if is_off_major_subject(subject) else "",
         " ".join(record.labels),
         record.ocr_text,
         record.transcript,

@@ -1,12 +1,23 @@
+from pathlib import Path
 from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Always load agent_sys/.env, even if uvicorn is started from another folder.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
 
 class Settings(BaseSettings):
+    """Centralised application settings loaded from environment variables and .env file.
+
+    All AWS credentials are optional — boto3 resolves them automatically via
+    its standard credential chain (env → ~/.aws → instance profile).
+    """
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -21,6 +32,11 @@ class Settings(BaseSettings):
 
     API_KEY_HEADER_NAME: str = "X-API-Key"
     ADMIN_API_KEY: str = Field(default="", description="Required in production")
+    ADMIN_USERNAME: str = Field(default="admin")
+    ADMIN_PASSWORD: str = Field(
+        default="",
+        description="Login password. Empty = use ADMIN_API_KEY",
+    )
     ALLOWED_ORIGINS: List[str] = Field(
         default=[
             "http://localhost:3000",
@@ -31,10 +47,6 @@ class Settings(BaseSettings):
             "http://127.0.0.1:8000",
         ]
     )
-
-    # memory = local/CI contract; aws = real boto3 services
-    MEDIA_PROVIDER: str = Field(default="memory")
-    SEED_DEMO_ITEMS: bool = Field(default=False)
 
     AWS_REGION: str = Field(default="us-east-1")
     MEDIA_BUCKET: str = Field(default="agentsys-media-bucket")
@@ -49,13 +61,13 @@ class Settings(BaseSettings):
     )
     CLOUDWATCH_NAMESPACE: str = "AgentSys"
 
-    # Optional S3-compatible endpoint for local experiments. Leave empty on AWS.
-    S3_ENDPOINT_URL: Optional[str] = None
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_SESSION_TOKEN: Optional[str] = None
 
     TRANSCRIBE_POLL_SECONDS: int = 5
-    TRANSCRIBE_MAX_WAIT_SECONDS: int = 120
+    TRANSCRIBE_MAX_WAIT_SECONDS: int = 180
 
 
 settings = Settings()
+# Reload settings
