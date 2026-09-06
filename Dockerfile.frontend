@@ -5,9 +5,7 @@ COPY gallery_web/package*.json ./
 RUN npm ci || npm install
 COPY gallery_web/ .
 ARG VITE_API_BASE=
-ARG VITE_API_KEY=local-dev-key
 ENV VITE_API_BASE=$VITE_API_BASE
-ENV VITE_API_KEY=$VITE_API_KEY
 RUN npm run build
 
 FROM nginx:alpine

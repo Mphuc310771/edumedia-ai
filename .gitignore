@@ -25,6 +25,7 @@ yarn-error.log*
 # AWS SAM & Build Artifacts
 .aws-sam/
 samconfig.toml
+pack/
 
 # Sandbox & Runtime logs
 /tmp/sandbox/
@@ -37,3 +38,8 @@ htmlcov/
 # OS Specific
 .DS_Store
 Thumbs.db
+
+# Hugo internship report
+report/public/
+report/resources/
+report/.hugo_build.lock

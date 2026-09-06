@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev/)
-[![Tests](https://img.shields.io/badge/Tests-25%20Passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-77%20Passed-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **Event-driven multimodal media intelligence and semantic retrieval platform built on AWS Serverless, Amazon Bedrock Generative AI, and Vector Embeddings.**
@@ -16,7 +16,7 @@
 ```mermaid
 flowchart TD
     Client([📱 Client Web / Mobile]):::client -->|Presigned PUT / REST API| S3[(Amazon S3 Private Media Bucket)]:::aws
-    Client <-->|REST API / Cognito Auth| APIGW[Amazon API Gateway HTTP API]:::aws
+    Client <-->|REST API · X-API-Key / JWT HS256| APIGW[Amazon API Gateway HTTP API]:::aws
     APIGW <--> LambdaAPI[AWS Lambda FastAPI API]:::aws
     
     S3 -->|s3:ObjectCreated Notification| SQS[Amazon SQS Ingest Queue]:::aws
@@ -33,7 +33,7 @@ flowchart TD
     Transcribe --> DynamoDB
     
     LambdaAPI <-->|Titan Multimodal Embeddings & Cosine Search| TitanEmbed[Amazon Titan Vector Embeddings]:::ai
-    LambdaAPI <-->|Query Planning: Nova Lite / Claude 3.5| Bedrock[Amazon Bedrock Agent]:::ai
+    LambdaAPI <-->|Query Planning: Nova Lite + Titan| Bedrock[Amazon Bedrock Converse]:::ai
     LambdaAPI <--> DynamoDB
     
     LambdaWorker --> CloudWatch[Amazon CloudWatch Metrics & Alarms]:::aws
@@ -54,7 +54,7 @@ flowchart TD
 | **AWS Lambda** | Serverless compute executing FastAPI REST endpoints (`ApiFunction`) and background worker (`IngestWorkerFunction`). |
 | **Amazon Rekognition** | Computer vision label classification (`DetectLabels`) and OCR text extraction (`DetectText`). |
 | **Amazon Transcribe** | Speech-to-text pipeline transcribing Vietnamese audio lectures (`vi-VN`) into indexed text. |
-| **Amazon Bedrock** | Generative AI query planning (Nova Lite / Claude 3.5 Sonnet) translating natural queries into structured search plans. |
+| **Amazon Bedrock** | Query planning via **Nova Lite** (`Converse`) and Titan embeddings for hybrid search. Claude is optional, not the lab default. |
 | **Amazon DynamoDB** | On-demand NoSQL document store with sub-10ms GSI queries (`category-index`). |
 | **Amazon CloudWatch** | End-to-end observability: Custom metric telemetry (`MediaIngested`), structured logs, and automated alarms. |
 | **AWS IAM** | Granular least-privilege role policies scoped per Lambda function (no static credentials). |
@@ -90,15 +90,10 @@ npm run dev
 
 ## 🧪 Automated Testing & Verification
 
-Run the full test suite (21 unit tests, ingest event simulation, search resilience, and SAM template validation):
+Run the full test suite:
 
 ```bash
 pytest tests/ -v
-```
-
-Pre-flight compliance check:
-```bash
-python scripts/verify_local.py
 ```
 
 ---
@@ -123,3 +118,4 @@ sam delete --stack-name agentsys
 ## 👨‍💻 Author & Program
 * **Author:** Đỗ Trần Minh Phúc (HCMUS)
 * **Program:** First Cloud AI Journey (FCAJ) — AWS Vietnam
+* **Internship report (Hugo, bilingual):** see [`report/`](report/README.md) → GitHub Pages after enabling the `gh-pages` branch: https://mphuc310771.github.io/serverless-multimodal-agent/

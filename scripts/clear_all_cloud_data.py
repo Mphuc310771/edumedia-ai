@@ -23,12 +23,9 @@ def run():
 
     # 2. Clear Amazon S3 Bucket Objects
     print(f"\n[*] [2/2] Clearing Amazon S3 Bucket: {settings.MEDIA_BUCKET}...")
-    s3 = boto3.client(
-        "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    from apps.aws.aws_services import _session_kwargs
+
+    s3 = boto3.client("s3", **_session_kwargs())
     
     deleted_s3_count = 0
     paginator = s3.get_paginator("list_objects_v2")
