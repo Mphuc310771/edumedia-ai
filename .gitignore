@@ -43,3 +43,6 @@ Thumbs.db
 report/public/
 report/resources/
 report/.hugo_build.lock
+
+sample_data/
+
