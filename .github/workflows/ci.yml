@@ -24,6 +24,10 @@ jobs:
           PYTHONPATH: .
           ADMIN_API_KEY: test-key
           ENVIRONMENT: development
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
         run: |
           python -m pytest tests/ -v --cov=apps --cov=pipeline --cov-fail-under=80 --cov-report=term-missing
 
