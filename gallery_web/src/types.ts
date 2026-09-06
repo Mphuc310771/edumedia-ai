@@ -32,16 +32,49 @@ export interface MediaItem {
   matchedOn?: string[]
   matchedFields?: string[]
   pipeline?: string[]
+  error?: string | null
+  analysisSource?: string
+  subject?: string
+  subjectLabel?: string
+}
+
+export const OFF_MAJOR_SUBJECTS = new Set([
+  "english",
+  "physics",
+  "chemistry",
+  "biology",
+  "economics",
+  "law",
+  "philosophy",
+  "pe",
+  "off_major",
+])
+
+export function isOffMajorSubject(subject?: string) {
+  return Boolean(subject && OFF_MAJOR_SUBJECTS.has(subject))
+}
+
+export interface SearchPlan {
+  keywords: string[]
+  media_type: string | null
+  category: string | null
+  rationale: string
+  planner_source?: string
+  embedding_source?: string
 }
 
 export interface AgentQueryResponse {
   user_query: string
   execution_status: string
-  plan: {
-    keywords: string[]
-    media_type: string | null
-    category: string | null
-    rationale: string
-  }
+  plan: SearchPlan
   results: MediaItem[]
+}
+
+export interface HealthResponse {
+  status: string
+  provider: string
+  environment?: string
+  ingest_mode?: "sync" | "event"
+  components?: Record<string, string>
+  message?: string
 }

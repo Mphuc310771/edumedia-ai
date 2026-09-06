@@ -1,44 +1,93 @@
-import React, { useEffect, useRef, useState } from "react"
-import { Header } from "./components/Header"
-import { CategoryTabs } from "./components/CategoryTabs"
+import React, { useEffect, useMemo, useRef, useState } from "react"
+import { Sidebar } from "./components/Sidebar"
+import { TopBar } from "./components/TopBar"
+import { Toolbar } from "./components/Toolbar"
+import { PlanBanner } from "./components/PlanBanner"
+import { EmptyState } from "./components/EmptyState"
 import { MediaCard } from "./components/MediaCard"
+import { MediaListRow } from "./components/MediaListRow"
 import { MediaDetailModal } from "./components/MediaDetailModal"
-import { ProcessingConsole, ConsoleLog } from "./components/ProcessingConsole"
+import { ProcessingConsole } from "./components/ProcessingConsole"
+import { DevPanel } from "./components/DevPanel"
 import { useMediaCatalog } from "./hooks/useMediaCatalog"
-import { fetchHealth, uploadMedia, deleteMedia, clearAllMedia } from "./api/client"
-import { MediaItem, SmartCategory } from "./types"
-import { Search, Sparkles, AlertCircle, RefreshCw, CheckCircle2, Trash2, UploadCloud, Cpu, Mic, Brain } from "lucide-react"
+import { useUploadQueue } from "./hooks/useUploadQueue"
+import { fetchHealth, deleteMedia, clearAllMedia, getSessionToken, clearSession } from "./api/client"
+import { LoginScreen } from "./components/LoginScreen"
+import { parseSize, SortMode, ViewMode } from "./catalog"
+import { HealthResponse, MediaItem, SmartCategory } from "./types"
+import { AlertCircle, CheckCircle2, CheckSquare, SearchX, Trash2, UploadCloud, X } from "lucide-react"
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => Boolean(getSessionToken()))
   const [activeCategory, setActiveCategory] = useState<SmartCategory>("all")
+  const [activeSubject, setActiveSubject] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null)
-  const [provider, setProvider] = useState("aws")
+  const [sort, setSort] = useState<SortMode>("newest")
+  const [view, setView] = useState<ViewMode>("grid")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
+  const [health, setHealth] = useState<HealthResponse | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const dropzoneInputRef = useRef<HTMLInputElement | null>(null)
-
-  // Live Console State
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
-  const [consoleMinimized, setConsoleMinimized] = useState(false)
-  const [totalUploadFiles, setTotalUploadFiles] = useState(0)
-  const [completedUploadFiles, setCompletedUploadFiles] = useState(0)
-  const [currentProcessingFile, setCurrentProcessingFile] = useState("")
-  const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([])
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const dragCounter = useRef(0)
 
-  const { items, allItems, loading, error, planRationale, reload } = useMediaCatalog(
-    activeCategory,
-    searchQuery
+  const {
+    items,
+    allItems,
+    loading,
+    aiLoading,
+    error,
+    plan,
+    planRationale,
+    aiActive,
+    runAiSearch,
+    clearAi,
+    reload,
+  } = useMediaCatalog(activeCategory, activeSubject, searchQuery, authed)
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg)
+    setTimeout(() => setToastMessage(null), 3200)
+  }
+
+  const { tasks, enqueue, retryIngest, busy } = useUploadQueue(
+    () => void reload(),
+    (ok, total) => triggerToast(ok ? `Đã xử lý xong ${ok}/${total} tệp` : "Không xử lý được tệp nào"),
   )
 
+  const handleUploadFiles = (files: File[]) => {
+    if (files.length === 0) return
+    enqueue(files)
+    setConsoleOpen(true)
+  }
+
+  const handleRetry = (item: MediaItem) => {
+    void retryIngest(item.id, item.filename)
+    setConsoleOpen(true)
+    triggerToast(`Đang phân tích lại ${item.filename}`)
+  }
+
   useEffect(() => {
-    fetchHealth()
-      .then((health) => setProvider(health.provider))
-      .catch(() => setProvider("offline"))
+    const load = () =>
+      fetchHealth()
+        .then(setHealth)
+        .catch(() => setHealth({ status: "OFFLINE", provider: "offline", components: { api: "OFFLINE" } }))
+    load()
+    const timer = window.setInterval(load, 300000)
+    return () => window.clearInterval(timer)
   }, [])
 
-  // Keyboard Shortcuts: '/' or 'Ctrl+K' to focus search, 'Escape' to close modal
+  useEffect(() => {
+    const onUnauthorized = () => setAuthed(false)
+    window.addEventListener("agentsys-unauthorized", onUnauthorized)
+    return () => window.removeEventListener("agentsys-unauthorized", onUnauthorized)
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -49,273 +98,346 @@ export default function App() {
         event.preventDefault()
         searchInputRef.current?.focus()
       }
-      if (event.key === "Escape") {
-        if (selectedItem) setSelectedItem(null)
+      if (event.key === "Escape" && !selectedId) {
+        setSelectMode(false)
+        setSelectedIds(new Set())
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [selectedItem])
+  }, [selectedId])
 
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 3000)
-  }
-
-  const addLog = (message: string, type: "info" | "success" | "warn" | "error" | "aws") => {
-    const time = new Date().toLocaleTimeString("vi-VN", { hour12: false })
-    setConsoleLogs((prev) => [
-      ...prev,
-      { id: Math.random().toString(36).substring(2, 9), timestamp: time, message, type },
-    ])
-  }
-
-  const handleUploadFiles = async (files: File[]) => {
-    if (files.length === 0) return
-
-    setConsoleOpen(true)
-    setConsoleMinimized(false)
-    setTotalUploadFiles(files.length)
-    setCompletedUploadFiles(0)
-    setConsoleLogs([])
-
-    addLog(`🚀 Khởi động pipeline xử lý ${files.length} tệp trên AWS Cloud...`, "aws")
-    addLog(`📡 Kết nối Amazon S3 (serverless-agent-media) & DynamoDB GSI...`, "info")
-
-    let completed = 0
-    let successCount = 0
-    const CONCURRENCY = 3
-    const queue = [...files]
-    let fileIndex = 0
-
-    const worker = async () => {
-      while (queue.length > 0) {
-        const file = queue.shift()
-        if (!file) break
-        const currentIndex = ++fileIndex
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1)
-        setCurrentProcessingFile(file.name)
-        const isAudioOrVideo = file.type.startsWith("audio/") || file.type.startsWith("video/") || file.name.endsWith(".m4a") || file.name.endsWith(".mp3")
-        const actionLabel = isAudioOrVideo ? "Đang tải lên & Bóc băng giọng nói AI" : "Đang tải lên S3 & Quét nhãn AI"
-        addLog(`📦 [${currentIndex}/${files.length}] ${actionLabel}: ${file.name} (${sizeMb} MB)...`, "info")
-        try {
-          const item = await uploadMedia(file)
-          successCount++
-          completed++
-          setCompletedUploadFiles(completed)
-          const labelsStr = item.labels && item.labels.length > 0 ? ` [${item.labels.slice(0, 3).join(", ")}]` : ""
-          addLog(`✅ [${currentIndex}/${files.length}] Hoàn tất: ${file.name}${labelsStr}`, "success")
-          if (completed % 2 === 0 || completed === files.length) {
-            void reload()
-          }
-        } catch (err: any) {
-          completed++
-          setCompletedUploadFiles(completed)
-          addLog(`⚠️ [${currentIndex}/${files.length}] Hoàn tất lưu trữ: ${file.name}`, "warn")
-        }
-      }
+  // Kéo-thả tệp ở bất kỳ đâu trên màn hình
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes("Files")
+    const onDragEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      dragCounter.current += 1
+      setIsDraggingFile(true)
     }
-
-    const workers = Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => worker())
-    await Promise.all(workers)
-
-    addLog(`🎉 Hoàn tất xử lý ${successCount}/${files.length} tệp trên AWS Cloud!`, "success")
-    await reload()
-    triggerToast(`Đã thêm thành công ${successCount} tệp vào kho dữ liệu!`)
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      void handleUploadFiles(Array.from(e.dataTransfer.files))
+    const onDragOver = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault()
     }
-  }
+    const onDragLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      dragCounter.current = Math.max(0, dragCounter.current - 1)
+      if (dragCounter.current === 0) setIsDraggingFile(false)
+    }
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      dragCounter.current = 0
+      setIsDraggingFile(false)
+      if (!authed) return
+      const files = Array.from(event.dataTransfer?.files || [])
+      if (files.length) handleUploadFiles(files)
+    }
+    window.addEventListener("dragenter", onDragEnter)
+    window.addEventListener("dragover", onDragOver)
+    window.addEventListener("dragleave", onDragLeave)
+    window.addEventListener("drop", onDrop)
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter)
+      window.removeEventListener("dragover", onDragOver)
+      window.removeEventListener("dragleave", onDragLeave)
+      window.removeEventListener("drop", onDrop)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed])
+
+  // Kết quả AI giữ thứ tự liên quan; thoát AI thì quay về mới nhất
+  useEffect(() => {
+    setSort((current) => {
+      if (aiActive && (current === "newest" || current === "oldest")) return "relevance"
+      if (!aiActive && current === "relevance") return "newest"
+      return current
+    })
+  }, [aiActive])
+
+  const sortedItems = useMemo(() => {
+    const list = [...items]
+    switch (sort) {
+      case "newest":
+        return list.sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+      case "oldest":
+        return list.sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+      case "name":
+        return list.sort((a, b) => a.filename.localeCompare(b.filename, "vi"))
+      case "size":
+        return list.sort((a, b) => parseSize(b.size) - parseSize(a.size))
+      default:
+        return list // relevance: giữ thứ tự server trả về
+    }
+  }, [items, sort])
+
+  const selectedIndex = useMemo(
+    () => (selectedId ? sortedItems.findIndex((item) => item.id === selectedId) : -1),
+    [selectedId, sortedItems],
+  )
 
   const handleClearAll = async () => {
-    if (!confirm("Bạn có chắc chắn muốn xóa toàn bộ dữ liệu trong kho Media không?")) return
+    if (!confirm("Xóa toàn bộ thư viện? Hành động này không thể hoàn tác.")) return
     await clearAllMedia()
     await reload()
-    triggerToast("Đã dọn sạch kho dữ liệu!")
+    triggerToast("Đã dọn sạch thư viện")
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+
+  const handleDeleteSelected = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    if (!confirm(`Xóa ${ids.length} tệp đã chọn?`)) return
+    const results = await Promise.allSettled(ids.map((id) => deleteMedia(id)))
+    const okCount = results.filter((result) => result.status === "fulfilled").length
+    await reload()
+    exitSelectMode()
+    triggerToast(`Đã xóa ${okCount}/${ids.length} tệp`)
+  }
+
+  const handleSelectCategory = (category: SmartCategory) => {
+    setActiveCategory(category)
+    setActiveSubject("all")
+    setSidebarOpen(false)
+  }
+
+  const handleSelectSubject = (subject: string) => {
+    setActiveSubject(subject)
+    setActiveCategory("all")
+    setSidebarOpen(false)
+  }
+
+  const resetFilters = () => {
+    setActiveCategory("all")
+    setActiveSubject("all")
+    setSearchQuery("")
+    clearAi()
+  }
+
+  const handleLogout = () => {
+    clearSession()
+    setAuthed(false)
+  }
+
+  const hasLibrary = allItems.length > 0
+  const filtered = Boolean(searchQuery.trim()) || activeCategory !== "all" || activeSubject !== "all"
+
+  if (!authed) {
+    return <LoginScreen onSuccess={() => setAuthed(true)} />
   }
 
   return (
-    <div className="min-h-screen flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-300 relative">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 animate-fade-in bg-slate-900/95 border border-emerald-500/40 text-slate-100 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5 text-xs font-medium">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{toastMessage}</span>
+    <div className="min-h-screen">
+      {/* Lớp phủ khi kéo tệp vào màn hình */}
+      {isDraggingFile && (
+        <div className="pointer-events-none fixed inset-0 z-[70] flex items-center justify-center bg-ink-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="flex flex-col items-center gap-4 rounded-3xl border-2 border-dashed border-violet-400/60 bg-violet-500/10 px-16 py-12">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-sky-400 shadow-glow">
+              <UploadCloud className="h-8 w-8 text-white" />
+            </div>
+            <p className="text-xl font-bold text-white">Thả tệp để tải lên</p>
+            <p className="text-sm text-slate-400">Ảnh, ghi âm hoặc video bài giảng</p>
+          </div>
         </div>
       )}
 
-      {/* Live AWS Processing Console Terminal */}
-      <ProcessingConsole
-        isOpen={consoleOpen}
-        isMinimized={consoleMinimized}
-        onToggleMinimize={() => setConsoleMinimized(!consoleMinimized)}
-        onClose={() => setConsoleOpen(false)}
-        totalFiles={totalUploadFiles}
-        completedFiles={completedUploadFiles}
-        currentFileName={currentProcessingFile}
-        logs={consoleLogs}
-        provider={provider}
-      />
-
-      {/* Modern Top Header with Integrated Search */}
-      <Header
-        provider={provider}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchInputRef={searchInputRef}
-        onUploaded={() => void reload()}
-        onUploadFiles={handleUploadFiles}
-      />
-
-      {/* Category Filter Pills (Only shown when items exist) */}
-      {allItems.length > 0 && (
-        <CategoryTabs
-          activeCategory={activeCategory}
-          onCategoryChange={setActiveCategory}
-          items={allItems}
-        />
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 z-[65] flex -translate-x-1/2 items-center gap-2.5 rounded-2xl border border-white/10 bg-ink-800/95 px-5 py-3 text-sm font-medium text-white shadow-pop backdrop-blur-xl animate-slide-up">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          {toastMessage}
+        </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 px-6 py-6 max-w-7xl mx-auto w-full flex flex-col justify-center">
-        {/* Results Bar (Only when items exist) */}
-        {allItems.length > 0 && (
-          <div className="flex items-center justify-between gap-3 mb-5 pb-2.5 border-b border-white/5 text-xs text-slate-400">
-            <div className="flex items-center gap-2.5">
-              <span className="font-semibold text-slate-200">
-                {searchQuery ? `Kết quả tìm kiếm (${items.length})` : `Tất cả Media (${items.length})`}
-              </span>
-              {loading && (
-                <span className="flex items-center gap-1.5 text-emerald-400">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  Đang tải...
-                </span>
+      <ProcessingConsole isOpen={consoleOpen} onClose={() => setConsoleOpen(false)} tasks={tasks} />
+
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        items={allItems}
+        activeCategory={activeCategory}
+        activeSubject={activeSubject}
+        onSelectCategory={handleSelectCategory}
+        onSelectSubject={handleSelectSubject}
+        health={health}
+        onOpenStatus={() => setStatusOpen(true)}
+        onLogout={handleLogout}
+      />
+
+      {statusOpen && <DevPanel health={health} onClose={() => setStatusOpen(false)} />}
+
+      <div className="flex min-h-screen flex-col lg:pl-[280px]">
+        <TopBar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onSubmitAi={() => void runAiSearch(searchQuery)}
+          aiLoading={aiLoading}
+          aiActive={aiActive}
+          searchInputRef={searchInputRef}
+          onUploadFiles={handleUploadFiles}
+          uploading={busy}
+          onOpenMenu={() => setSidebarOpen(true)}
+        />
+
+        <main className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col px-4 pb-10 pt-5 sm:px-6 lg:px-8">
+          {aiActive && planRationale && <PlanBanner plan={plan} rationale={planRationale} onClear={clearAi} />}
+
+          {error && (
+            <div className="mb-5 flex items-center gap-2.5 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-200 animate-fade-in">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {hasLibrary && (
+            <Toolbar
+              activeCategory={activeCategory}
+              activeSubject={activeSubject}
+              searchQuery={searchQuery}
+              count={sortedItems.length}
+              loading={loading || aiLoading}
+              sort={sort}
+              onSortChange={setSort}
+              view={view}
+              onViewChange={setView}
+              aiActive={aiActive}
+              selectMode={selectMode}
+              onToggleSelectMode={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+              onRefresh={() => void reload()}
+              onClearAll={() => void handleClearAll()}
+            />
+          )}
+
+          {!hasLibrary && !loading && <EmptyState onFiles={handleUploadFiles} />}
+
+          {loading && !hasLibrary && (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="skeleton aspect-[4/3]" style={{ animationDelay: `${i * 60}ms` }} />
+              ))}
+            </div>
+          )}
+
+          {hasLibrary && sortedItems.length === 0 && !loading && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 py-20 text-center animate-fade-in">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl surface text-slate-500">
+                <SearchX className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-white">Không tìm thấy tệp phù hợp</p>
+                <p className="mx-auto mt-1.5 max-w-md text-sm text-slate-400">
+                  {searchQuery.trim()
+                    ? "Thử từ khóa khác, hoặc nhấn Enter để tìm sâu bằng AI theo ngữ nghĩa."
+                    : "Thử chọn danh mục hoặc môn học khác."}
+                </p>
+              </div>
+              {filtered && (
+                <button type="button" onClick={resetFilters} className="btn-ghost surface">
+                  Xóa mọi bộ lọc
+                </button>
               )}
             </div>
+          )}
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => void reload()}
-                className="hover:text-slate-200 p-1.5 rounded-lg hover:bg-white/5 transition-colors flex items-center gap-1"
-                title="Làm mới danh sách"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline text-[11px]">Làm mới</span>
-              </button>
-
-              <button
-                onClick={handleClearAll}
-                className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors flex items-center gap-1"
-                title="Dọn sạch kho dữ liệu"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline text-[11px]">Dọn sạch</span>
-              </button>
+          {sortedItems.length > 0 && view === "grid" && (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {sortedItems.map((item, index) => (
+                <MediaCard
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  selectMode={selectMode}
+                  selected={selectedIds.has(item.id)}
+                  onClick={() => (selectMode ? toggleSelect(item.id) : setSelectedId(item.id))}
+                  onRetry={() => handleRetry(item)}
+                />
+              ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* AI Search Rationale Box */}
-        {planRationale && (
-          <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-md flex items-start gap-3">
-            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <div className="flex-1 text-xs leading-relaxed text-emerald-200">
-              <strong className="font-semibold text-emerald-300">Phân tích AI:</strong> {planRationale}
+          {sortedItems.length > 0 && view === "list" && (
+            <div className="overflow-hidden rounded-2xl surface">
+              {sortedItems.map((item, index) => (
+                <MediaListRow
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  selectMode={selectMode}
+                  selected={selectedIds.has(item.id)}
+                  onClick={() => (selectMode ? toggleSelect(item.id) : setSelectedId(item.id))}
+                />
+              ))}
             </div>
-          </div>
-        )}
+          )}
+        </main>
 
-        {/* Error Alert */}
-        {error && (
-          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <footer className="border-t border-white/[0.05] py-4 text-center text-xs text-slate-600">
+          AgentSys · First Cloud AI Journey · AWS Serverless
+        </footer>
+      </div>
 
-        {/* Empty State / Central Studio Dropzone */}
-        {allItems.length === 0 && !loading && (
-          <div className="flex-1 flex flex-col items-center justify-center py-12 animate-fade-in">
-            <div
-              onDragOver={(e) => {
-                e.preventDefault()
-                setIsDragging(true)
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => dropzoneInputRef.current?.click()}
-              className={`w-full max-w-xl p-10 rounded-3xl border-2 border-dashed transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center backdrop-blur-xl ${
-                isDragging
-                  ? "border-emerald-500 bg-emerald-500/10 scale-[1.02] shadow-[0_0_40px_rgba(16,185,129,0.2)]"
-                  : "border-white/10 bg-white/[0.02] hover:border-emerald-500/40 hover:bg-white/[0.04] shadow-2xl"
-              }`}
-            >
-              <input
-                ref={dropzoneInputRef}
-                type="file"
-                multiple
-                accept="image/*,audio/*,video/*"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files) void handleUploadFiles(Array.from(e.target.files))
-                }}
-              />
+      {/* Thanh hành động khi đang chọn nhiều */}
+      {selectMode && (
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-ink-800/95 p-2 pl-4 shadow-pop backdrop-blur-xl animate-slide-up">
+          <span className="text-sm font-semibold text-white">
+            {selectedIds.size} đã chọn
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set(sortedItems.map((item) => item.id)))}
+            className="btn-ghost"
+          >
+            <CheckSquare className="h-4 w-4" />
+            Chọn tất cả
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDeleteSelected()}
+            disabled={selectedIds.size === 0}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-rose-500/90 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" />
+            Xóa
+          </button>
+          <button type="button" onClick={exitSelectMode} className="btn-ghost" aria-label="Thoát chế độ chọn">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
-              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-5 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                <UploadCloud className="w-8 h-8 animate-pulse" />
-              </div>
-
-              <h2 className="text-lg font-bold text-white mb-2">Thêm tài liệu đa phương tiện</h2>
-              <p className="text-xs text-slate-400 max-w-sm mb-6 leading-relaxed">
-                Kéo thả nhiều ảnh, video hoặc file ghi âm vào đây. Hệ thống tự động phân loại, đọc chữ OCR và nhận diện giọng nói.
-              </p>
-
-              <button className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 hover:scale-105">
-                Chọn tệp từ máy tính
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Media Grid Cards */}
-        {allItems.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
-            {items.map((item) => (
-              <MediaCard
-                key={item.id}
-                item={item}
-                onClick={() => setSelectedItem(item)}
-              />
-            ))}
-          </div>
-        )}
-      </main>
-
-      {/* Detail Modal */}
-      {selectedItem && (
+      {selectedIndex >= 0 && (
         <MediaDetailModal
-          item={selectedItem}
-          onClose={() => setSelectedItem(null)}
+          items={sortedItems}
+          index={selectedIndex}
+          onClose={() => setSelectedId(null)}
+          onNavigate={(delta) => {
+            const next = sortedItems[selectedIndex + delta]
+            if (next) setSelectedId(next.id)
+          }}
           onDelete={async (id) => {
             await deleteMedia(id)
-            setSelectedItem(null)
+            setSelectedId(null)
             await reload()
-            triggerToast("Đã xóa tệp thành công!")
+            triggerToast("Đã xóa tệp")
+          }}
+          onRetry={(item) => {
+            setSelectedId(null)
+            handleRetry(item)
           }}
         />
       )}
-
-      {/* Minimalist Tech Footer */}
-      <footer className="mt-auto py-5 border-t border-white/5 text-center text-[11px] text-slate-500 flex items-center justify-center gap-3">
-        <span>AgentSys AI Studio</span>
-        <span>•</span>
-        <span>First Cloud AI Journey (FCAJ)</span>
-      </footer>
     </div>
   )
 }

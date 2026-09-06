@@ -1,146 +1,159 @@
-import React, { useEffect, useRef, useState } from "react"
-import { CheckCircle2, Loader2, X, ChevronUp, ChevronDown } from "lucide-react"
-
-export interface ConsoleLog {
-  id: string
-  timestamp: string
-  message: string
-  type: "info" | "success" | "warn" | "error" | "aws"
-  service?: "s3" | "rekognition" | "transcribe" | "dynamodb" | "bedrock"
-}
+import React, { useEffect, useRef } from "react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Loader2,
+  Sparkles,
+  UploadCloud,
+  X,
+} from "lucide-react"
+import { UploadTask } from "../hooks/useUploadQueue"
 
 interface ProcessingConsoleProps {
   isOpen: boolean
-  isMinimized: boolean
-  onToggleMinimize: () => void
   onClose: () => void
-  totalFiles: number
-  completedFiles: number
-  currentFileName: string
-  logs: ConsoleLog[]
-  provider?: string
+  tasks: UploadTask[]
 }
 
-export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({
-  isOpen,
-  onClose,
-  totalFiles,
-  completedFiles,
-  currentFileName,
-  logs,
-}) => {
-  const logContainerRef = useRef<HTMLDivElement | null>(null)
-  const [isExpanded, setIsExpanded] = useState(false)
+function TaskIcon({ status }: { status: UploadTask["status"] }) {
+  switch (status) {
+    case "queued":
+      return <Clock className="h-3.5 w-3.5 text-slate-500" />
+    case "uploading":
+      return <UploadCloud className="h-3.5 w-3.5 animate-pulse text-sky-300" />
+    case "processing":
+      return <Sparkles className="h-3.5 w-3.5 animate-pulse text-violet-300" />
+    case "done":
+      return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+    case "failed":
+      return <AlertCircle className="h-3.5 w-3.5 text-rose-400" />
+  }
+}
 
-  // Auto-scroll to bottom of logs
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
-    }
-  }, [logs])
+const STATUS_TEXT: Record<UploadTask["status"], string> = {
+  queued: "Chờ đến lượt",
+  uploading: "Đang tải lên S3",
+  processing: "AI đang phân tích",
+  done: "Hoàn tất",
+  failed: "Thất bại",
+}
 
-  // Auto-close 5s after 100% completion
+export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({ isOpen, onClose, tasks }) => {
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const [isExpanded, setIsExpanded] = React.useState(true)
+
+  const total = tasks.length
+  const settled = tasks.filter((task) => task.status === "done" || task.status === "failed").length
+  const okCount = tasks.filter((task) => task.status === "done").length
+  const isFinished = total > 0 && settled >= total
+  const progressPercent = total > 0 ? Math.round((settled / total) * 100) : 0
+  const active = tasks.find((task) => task.status === "processing") || tasks.find((task) => task.status === "uploading")
+
   useEffect(() => {
-    if (totalFiles > 0 && completedFiles >= totalFiles) {
-      const timer = setTimeout(() => {
-        onClose()
-      }, 5000)
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+  }, [tasks])
+
+  useEffect(() => {
+    if (isFinished) {
+      const timer = setTimeout(() => onClose(), 8000)
       return () => clearTimeout(timer)
     }
-  }, [completedFiles, totalFiles, onClose])
+  }, [isFinished, onClose])
 
-  if (!isOpen) return null
-
-  const progressPercent = totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : 0
-  const isFinished = totalFiles > 0 && completedFiles >= totalFiles
+  if (!isOpen || total === 0) return null
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: "24px",
-        right: "24px",
-        top: "auto",
-        left: "auto",
-        zIndex: 9999,
-      }}
-      className="animate-fade-in max-w-sm w-[380px] pointer-events-auto select-none"
-    >
-      <div className="bg-slate-950/95 border border-white/20 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl overflow-hidden flex flex-col">
-        {/* Compact Floating Status Header (Default View) */}
-        <div className="p-3 flex items-center justify-between gap-2.5 bg-white/[0.03]">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            {isFinished ? (
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              </div>
-            ) : (
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-              </div>
-            )}
-
-            <div className="flex flex-col min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-white truncate">
-                  {isFinished ? "Đã tải lên hoàn tất" : `Đang tải lên AWS (${completedFiles}/${totalFiles})`}
+    <div className="pointer-events-auto fixed bottom-5 right-5 z-[60] w-[min(420px,calc(100vw-2rem))] animate-slide-up">
+      <div className="overflow-hidden rounded-2xl border border-white/[0.09] bg-ink-900/95 shadow-pop backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-3 p-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                isFinished
+                  ? okCount > 0
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-rose-500/15 text-rose-400"
+                  : "bg-gradient-to-br from-violet-500/25 to-sky-400/25 text-violet-300"
+              }`}
+            >
+              {isFinished ? (
+                okCount > 0 ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : (
+                  <AlertCircle className="h-5 w-5" />
+                )
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-bold text-white">
+                  {isFinished ? `Xong ${okCount}/${total} tệp` : `Đang xử lý ${settled}/${total} tệp`}
                 </span>
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 shrink-0">
+                <span className="rounded-md bg-violet-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-violet-200">
                   {progressPercent}%
                 </span>
               </div>
-              <span className="text-[10px] text-slate-400 truncate">
-                {isFinished ? "Tất cả tệp đã sẵn sàng trong kho" : currentFileName || "Đang truyền tải dữ liệu..."}
-              </span>
+              <p className="truncate text-xs text-slate-500">
+                {isFinished
+                  ? "Bạn có thể tiếp tục dùng thư viện"
+                  : active
+                    ? `${STATUS_TEXT[active.status]}: ${active.fileName}`
+                    : "Đang chuẩn bị..."}
+              </p>
             </div>
           </div>
-
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5">
             <button
+              type="button"
               onClick={() => setIsExpanded(!isExpanded)}
-              className="px-2 py-1 rounded-md text-[10px] font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1"
+              className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition hover:bg-white/[0.06] hover:text-white"
             >
-              <span>{isExpanded ? "Thu gọn" : "Nhật ký"}</span>
-              {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+              Chi tiết
+              {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/[0.06] hover:text-white"
+              aria-label="Đóng"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Minimal Progress Bar */}
-        <div className="w-full h-1 bg-white/10 overflow-hidden">
+        <div className="h-1 bg-white/[0.06]">
           <div
-            className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300 ease-out"
+            className="h-full bg-gradient-to-r from-violet-500 to-sky-400 transition-all duration-500"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
 
-        {/* Expandable Activity Log Stream (Clean & Pure Vietnamese) */}
         {isExpanded && (
-          <div
-            ref={logContainerRef}
-            className="p-3 overflow-y-auto space-y-1.5 font-mono text-[10px] max-h-40 bg-black/70 border-t border-white/10 scrollbar-thin"
-          >
-            {logs.map((log) => (
-              <div key={log.id} className="flex items-start gap-1.5 leading-relaxed text-slate-300">
-                <span className="text-slate-500 text-[9px] shrink-0">{log.timestamp}</span>
-                <span
-                  className={`text-[9px] px-1 py-0.2 rounded font-bold shrink-0 ${
-                    log.type === "success"
-                      ? "bg-emerald-500/20 text-emerald-300"
-                      : log.type === "warn"
-                      ? "bg-amber-500/20 text-amber-300"
-                      : "bg-white/10 text-slate-400"
-                  }`}
-                >
-                  {log.type === "success" ? "XONG" : log.type === "warn" ? "LƯU" : "TIẾP"}
+          <div ref={listRef} className="max-h-56 overflow-y-auto border-t border-white/[0.06] bg-ink-950/80">
+            {tasks.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-start gap-2.5 border-b border-white/[0.04] px-3.5 py-2.5 last:border-b-0"
+              >
+                <span className="mt-0.5 shrink-0">
+                  <TaskIcon status={task.status} />
                 </span>
-                <span className="break-all flex-1 text-slate-300">{log.message}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-semibold text-slate-200">{task.fileName}</span>
+                  <span
+                    className={`block truncate text-[11px] ${
+                      task.status === "failed" ? "text-rose-300" : "text-slate-500"
+                    }`}
+                  >
+                    {task.status === "failed" && task.error ? task.error : STATUS_TEXT[task.status]}
+                  </span>
+                </span>
               </div>
             ))}
           </div>
