@@ -1,0 +1,78 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBTableAndStreamAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:DescribeStream",
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:*:table/AgentSysMediaMetadata",
+        "arn:aws:dynamodb:us-east-1:*:table/AgentSysMediaMetadata/index/*",
+        "arn:aws:dynamodb:us-east-1:*:table/AgentSysMediaMetadata/stream/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBListStreamsGlobal",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ListStreams"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockNovaLiteInvocationOnly",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
+      ]
+    },
+    {
+      "Sid": "SQSQueueAndDLQAccess",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:us-east-1:*:agentsys-ingest-queue",
+        "arn:aws:sqs:us-east-1:*:agentsys-ingest-dlq",
+        "arn:aws:sqs:us-east-1:*:agentsys-aggregator-stream-dlq"
+      ]
+    },
+    {
+      "Sid": "S3TranscriptAndMediaRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::agentsys-media-bucket/transcripts/*",
+        "arn:aws:s3:::agentsys-media-bucket/uploads/*"
+      ]
+    },
+    {
+      "Sid": "CloudWatchStandardLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/agentsys-*"
+      ]
+    }
+  ]
+}

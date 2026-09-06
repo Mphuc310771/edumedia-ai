@@ -1,3 +1,14 @@
+"""Media ingestion and analysis pipeline worker.
+
+Pipeline flow:
+    1. S3 Storage: Ingest raw media objects uploaded to Amazon S3.
+    2. Vision / Speech Analysis:
+       - Images: Amazon Rekognition (DetectLabels, DetectText) + JPEG thumbnail generation.
+       - Audio/Video: Amazon Transcribe (Vietnamese speech-to-text transcription).
+    3. Classification & Categorization: Heuristic rule-based and Bedrock LLM taxonomy classification.
+    4. Vector Embedding: Amazon Titan Text Embeddings (downsampled from 1536-d to 256-d).
+    5. Catalog Persistence: Save indexed MediaRecord item into Amazon DynamoDB.
+"""
 from __future__ import annotations
 
 import logging
@@ -6,7 +17,7 @@ import re
 from typing import Optional
 
 from apps.aws.providers import get_runtime
-from apps.domain import CATEGORY_LABELS, MediaRecord, infer_category, infer_media_type
+from apps.domain import CATEGORY_LABELS, SUBJECT_LABELS, MediaRecord, infer_category, infer_media_type, infer_subject, resolve_subject, usable_ocr_text
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +113,9 @@ LABEL_TRANSLATIONS = {
     "receipt": "Hóa đơn",
     "invoice": "Biên lai",
     "whiteboard": "Bảng viết",
+    "white board": "Bảng viết",
+    "blackboard": "Bảng đen",
+    "black board": "Bảng đen",
     "document": "Tài liệu",
     "paper": "Giấy tờ",
     "text": "Văn bản",
@@ -131,12 +145,41 @@ def translate_labels(labels: list[str]) -> list[str]:
 
 def _clean_ocr_snippet(ocr_text: str) -> str:
     """Extract a clean, readable text snippet from OCR, filtering out noisy symbols."""
-    lines = [line.strip() for line in (ocr_text or "").splitlines() if line.strip()]
-    meaningful = [l for l in lines if not l.startswith("http") and len(l) > 2 and not l.isdigit()]
-    if meaningful:
-        combined = " • ".join(meaningful[:3])
+    lines = [line.strip() for line in usable_ocr_text(ocr_text).splitlines() if line.strip()]
+    if lines:
+        combined = " • ".join(lines[:3])
         return combined[:80]
     return ""
+
+
+def _in_lambda() -> bool:
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+
+def _maybe_embed(record: MediaRecord) -> None:
+    runtime = get_runtime()
+    bedrock_client = getattr(runtime.planner, "client", None)
+    if bedrock_client is None:
+        return
+    from apps.search.vector_engine import maybe_store_embedding
+
+    blob = " ".join([record.filename, " ".join(record.labels), record.ocr_text, record.transcript, record.summary])
+    record.embedding = maybe_store_embedding(blob, bedrock_client=bedrock_client)
+
+
+def _write_thumb(file_id: str, object_key: str) -> Optional[str]:
+    runtime = get_runtime()
+    try:
+        from apps.aws.image_convert import make_thumbnail_jpeg
+
+        raw = runtime.store.get_bytes(object_key)
+        jpeg = make_thumbnail_jpeg(raw)
+        key = f"thumbs/{file_id}.jpg"
+        runtime.store.put_bytes(key, jpeg, "image/jpeg")
+        return key
+    except Exception as exc:
+        logger.warning("thumbnail skipped file_id=%s: %s", file_id, exc)
+        return None
 
 
 def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None, content_type: str = "") -> MediaRecord:
@@ -161,31 +204,46 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
         transcript = ""
 
         if media_type == "image":
-            try:
-                labels, ocr = runtime.vision.analyze_image(object_key, name)
-            except Exception as exc:
-                logger.warning("Vision analysis error on %s: %s", name, exc)
-                labels = ["Ảnh"]
-                ocr = ""
+            labels, ocr = runtime.vision.analyze_image(object_key, name)
+            record.analysis_source = "rekognition"
+            record.thumb_key = _write_thumb(file_id, object_key)
         elif media_type in {"audio", "video"}:
-            try:
-                media_format = {**AUDIO_FORMATS, **VIDEO_FORMATS}.get(ext, "mp4")
-                transcript = runtime.speech.transcribe(object_key, media_format)
-                labels = ["Giọng nói", "Ghi âm"] if transcript else ["Phương tiện"]
-            except Exception as exc:
-                logger.warning("Speech analysis error on %s: %s", name, exc)
-                labels = ["Ghi âm"]
+            media_format = {**AUDIO_FORMATS, **VIDEO_FORMATS}.get(ext, "mp4")
+            speech = runtime.speech
+            if not hasattr(speech, "start_job"):
+                raise RuntimeError("Amazon Transcribe is required")
+            job_name = speech.start_job(object_key, media_format, file_id=file_id)
+            if not job_name:
+                raise RuntimeError("Amazon Transcribe did not start")
+            record.transcribe_job_name = job_name
+            if _in_lambda():
+                record.labels = ["Giọng nói"]
+                record.category = infer_category(media_type, record.labels, name)
+                record.summary = "Đang chờ Amazon Transcribe hoàn tất (EventBridge)."
+                record.status = "INDEXING"
+                record.analysis_source = "transcribe-indexing"
+                runtime.catalog.put(record)
+                runtime.metrics.emit("MediaIngested", 1)
+                return record
+            transcript = speech.wait_for_job(job_name)
+            record.analysis_source = "transcribe"
+            labels = ["Giọng nói", "Ghi âm"] if transcript else ["Phương tiện"]
         else:
             labels = ["Tài liệu"]
+            record.analysis_source = runtime.provider
 
-        blob = " ".join([*labels, ocr, transcript, name])
-        record.category = infer_category(media_type, labels, blob)
+        blob = " ".join([*labels, usable_ocr_text(ocr), transcript, name])
+        bedrock_client = getattr(runtime.planner, "client", None)
+        record.category = infer_category(media_type, labels, blob, bedrock_client=bedrock_client)
         record.labels = translate_labels(labels)
-        record.ocr_text = ocr
+        record.ocr_text = usable_ocr_text(ocr)
         record.transcript = transcript
+        record.subject = infer_subject(record.labels, record.ocr_text, transcript, name, bedrock_client=bedrock_client)
+        record.subject = resolve_subject(record)
         record.summary = _build_summary(record)
         record.status = "READY"
         record.error = None
+        _maybe_embed(record)
         runtime.catalog.put(record)
         runtime.metrics.emit("MediaIngested", 1)
         return record
@@ -198,27 +256,157 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
         raise
 
 
+def _extract_audio_highlights(text: str) -> Optional[str]:
+    if not text:
+        return None
+    points = []
+    pres = re.search(r"(?:trình bày|thuyết trình)[^\.\,]*?(\d+\s*phút)", text, re.IGNORECASE)
+    if pres:
+        points.append(f"Thuyết trình ({pres.group(1).strip()}/nhóm)")
+
+    exam = re.search(r"thi lý thuyết[^\.\,]*?(?:ngày\s*)?(\d+\s*tháng\s*\d+|\d+/\d+)", text, re.IGNORECASE)
+    if exam:
+        points.append(f"Thi lý thuyết: {exam.group(1).strip()}")
+
+    subm = re.search(r"(\d+\s*tháng\s*\d+|\d+/\d+)[^\.\,]*?nộp", text, re.IGNORECASE) or re.search(
+        r"nộp[^\.\,]*?(\d+\s*tháng\s*\d+|\d+/\d+)", text, re.IGNORECASE
+    )
+    if subm:
+        points.append(f"Hạn nộp đồ án: {subm.group(1).strip()}")
+
+    score = re.search(r"(\d+\s*tháng\s*\d+|\d+/\d+)[^\.\,]*?(?:có\s*)?điểm", text, re.IGNORECASE)
+    if score:
+        points.append(f"Công bố điểm: {score.group(1).strip()}")
+
+    if re.search(r"(bảo vệ|chuẩn đầu ra|anh văn|tốt nghiệp|thủ dưỡng)", text, re.IGNORECASE):
+        points.append("Lưu ý bảo vệ & chuẩn đầu ra")
+
+    if len(points) >= 2:
+        return "Hướng dẫn đồ án & lịch thi: " + " · ".join(points)
+    return None
+
+
 def _build_summary(record: MediaRecord) -> str:
     category_name = CATEGORY_LABELS.get(record.category, record.category)
+    subject_name = SUBJECT_LABELS.get(resolve_subject(record), "")
+    subject_bit = f" · môn {subject_name}" if subject_name else ""
 
     if record.media_type == "audio":
+        highlights = _extract_audio_highlights(record.transcript)
+        if highlights:
+            return highlights
         if record.transcript and not record.transcript.startswith("Bản ghi"):
             clean_first = record.transcript.strip()[:100].rstrip(".")
-            return f"Bản ghi âm lời thoại: \"{clean_first}...\""
-        return f"File ghi âm đã lưu trữ và lập chỉ mục trong danh mục {category_name}."
+            heading = subject_name or "bài giảng"
+            return f"Bản ghi âm {heading}: \"{clean_first}...\""
+        return f"File ghi âm đã lưu trữ{subject_bit} trong danh mục {category_name}."
 
     if record.media_type == "video":
-        return f"Tệp video đa phương tiện được lưu trữ trong danh mục {category_name}."
+        return f"Tệp video đa phương tiện{subject_bit} trong danh mục {category_name}."
 
-    # Image summary synthesis
     labels_str = ", ".join(record.labels[:4]) if record.labels else ""
     ocr_snippet = _clean_ocr_snippet(record.ocr_text)
 
-    if labels_str and ocr_snippet:
-        return f"Ảnh chụp gồm {labels_str.lower()}. Văn bản hiển thị: \"{ocr_snippet}\"."
-    if labels_str:
-        return f"Ảnh chụp nhận diện {labels_str.lower()}, xếp vào danh mục {category_name}."
-    if ocr_snippet:
-        return f"Văn bản trích xuất: \"{ocr_snippet}\"."
+    if record.category == "scenes":
+        return f"Ảnh phong cảnh & du lịch ({labels_str.lower()})." + (f' Văn bản: "{ocr_snippet}".' if ocr_snippet else "")
+    if record.category == "food":
+        return f"Ảnh ẩm thực & món ăn ({labels_str.lower()})."
+    if record.category == "people":
+        return f"Ảnh con người & nhân vật ({labels_str.lower()})."
+    if record.category == "pets":
+        return f"Ảnh thú cưng & động vật ({labels_str.lower()})."
+    if record.category == "receipts":
+        return f'Hóa đơn / Biên lai thanh toán. Văn bản: "{ocr_snippet or labels_str}".'
 
-    return f"Tài liệu {record.filename} đã được phân loại vào danh mục {category_name}."
+    heading = f"Tài liệu {subject_name}" if subject_name else "Tài liệu học tập"
+    if ocr_snippet:
+        return f'{heading}: "{ocr_snippet}".'
+    if labels_str:
+        return f"Ảnh nhận diện {labels_str.lower()}{subject_bit}."
+
+    return f"Tài liệu {record.filename} đã được phân loại vào {category_name}{subject_bit}."
+
+
+def _extract_file_id_from_job_name(job_name: str) -> Optional[str]:
+    """Extract file_id from new-format job name: agentsys--{file_id}--{key}."""
+    if job_name.startswith("agentsys--") and "--" in job_name[len("agentsys--"):]:
+        rest = job_name[len("agentsys--"):]
+        parts = rest.split("--", 1)
+        if len(parts) == 2 and parts[0]:
+            return parts[0]
+    return None
+
+
+def find_record_for_transcribe_job(job_name: str) -> Optional[MediaRecord]:
+    runtime = get_runtime()
+
+    # Fast path: new-format job name encodes file_id → DynamoDB GetItem.
+    file_id = _extract_file_id_from_job_name(job_name)
+    if file_id:
+        record = runtime.catalog.get(file_id)
+        if record is not None:
+            return record
+
+    # Slow path (backward compat): old-format agentsys-uploads-xxx → scan.
+    for rec in runtime.catalog.list_all():
+        if rec.transcribe_job_name == job_name:
+            return rec
+    if job_name.startswith("agentsys-"):
+        remainder = job_name[len("agentsys-") :]
+        object_key = remainder.replace("-", "/", 1)
+        for rec in runtime.catalog.list_all():
+            if rec.s3_key == object_key or rec.file_id in job_name:
+                return rec
+    return None
+
+
+def apply_transcribe_job(job_name: str, job_status: str) -> dict:
+    runtime = get_runtime()
+    record = find_record_for_transcribe_job(job_name)
+    if record is None:
+        logger.warning("transcribe_job_no_record job=%s", job_name)
+        return {"ok": True, "job_name": job_name, "status": job_status, "warning": "record not found", "source": "EventBridge"}
+
+    if job_status == "FAILED":
+        record.status = "FAILED"
+        record.error = f"Amazon Transcribe job failed: {job_name}"
+        runtime.catalog.put(record)
+        runtime.metrics.emit("MediaIngestFailed", 1)
+        return {"ok": True, "file_id": record.file_id, "status": "FAILED", "source": "EventBridge"}
+
+    speech = runtime.speech
+    transcript = ""
+    if hasattr(speech, "read_job_transcript"):
+        transcript = speech.read_job_transcript(job_name)
+    if not transcript:
+        record.status = "FAILED"
+        record.error = "Transcribe COMPLETED but transcript could not be read"
+        runtime.catalog.put(record)
+        return {"ok": False, "file_id": record.file_id, "error": record.error, "source": "EventBridge"}
+
+    record.transcript = transcript
+    record.labels = translate_labels(["Giọng nói", "Ghi âm"])
+    bedrock_client = getattr(runtime.planner, "client", None)
+    record.category = infer_category(
+        record.media_type,
+        record.labels,
+        f"{transcript} {record.filename}",
+        bedrock_client=bedrock_client,
+    )
+    record.subject = infer_subject(
+        record.labels,
+        record.ocr_text,
+        transcript,
+        record.filename,
+        bedrock_client=bedrock_client,
+    )
+    record.subject = resolve_subject(record)
+    record.summary = _build_summary(record)
+    record.status = "READY"
+    record.error = None
+    record.analysis_source = "transcribe"
+    _maybe_embed(record)
+    runtime.catalog.put(record)
+    runtime.metrics.emit("MediaIngested", 1)
+    logger.info("dynamodb_transcript_updated file_id=%s", record.file_id)
+    return {"ok": True, "file_id": record.file_id, "status": "READY", "source": "EventBridge"}

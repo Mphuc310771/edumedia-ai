@@ -2,15 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from apps.aws.local_gpu import LocalGPUVision
-from apps.aws.memory import (
-    MemoryCatalog,
-    MemoryMetrics,
-    MemoryObjectStore,
-    MemoryPlanner,
-    MemorySpeech,
-    MemoryVision,
-)
 from apps.aws.protocols import (
     Catalog,
     Metrics,
@@ -30,7 +21,7 @@ class Runtime:
     speech: SpeechAnalyzer
     planner: QueryPlanner
     metrics: Metrics
-    provider: str
+    provider: str = "aws"
 
 
 _RUNTIME: Runtime | None = None
@@ -39,38 +30,37 @@ _RUNTIME: Runtime | None = None
 def get_runtime() -> Runtime:
     global _RUNTIME
     if _RUNTIME is None:
-        _RUNTIME = build_runtime(settings.MEDIA_PROVIDER)
+        _RUNTIME = build_runtime()
     return _RUNTIME
 
 
-def build_runtime(provider: str) -> Runtime:
-    if provider == "aws":
-        from apps.aws.aws_services import (
-            BedrockPlanner,
-            CloudWatchMetrics,
-            DynamoCatalog,
-            RekognitionVision,
-            S3ObjectStore,
-            TranscribeSpeech,
-        )
+def build_runtime() -> Runtime:
+    import logging
 
-        return Runtime(
-            catalog=DynamoCatalog(),
-            store=S3ObjectStore(),
-            vision=RekognitionVision(),
-            speech=TranscribeSpeech(),
-            planner=BedrockPlanner(),
-            metrics=CloudWatchMetrics(),
-            provider="aws",
-        )
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "runtime_provider=aws bucket=%s table=%s region=%s",
+        settings.MEDIA_BUCKET,
+        settings.METADATA_TABLE,
+        settings.AWS_REGION,
+    )
+    from apps.aws.aws_services import (
+        BedrockPlanner,
+        CloudWatchMetrics,
+        DynamoCatalog,
+        RekognitionVision,
+        S3ObjectStore,
+        TranscribeSpeech,
+    )
+
     return Runtime(
-        catalog=MemoryCatalog(seed=settings.SEED_DEMO_ITEMS),
-        store=MemoryObjectStore(),
-        vision=LocalGPUVision(fallback_vision=MemoryVision()),
-        speech=MemorySpeech(),
-        planner=MemoryPlanner(),
-        metrics=MemoryMetrics(),
-        provider="memory",
+        catalog=DynamoCatalog(),
+        store=S3ObjectStore(),
+        vision=RekognitionVision(),
+        speech=TranscribeSpeech(),
+        planner=BedrockPlanner(),
+        metrics=CloudWatchMetrics(),
+        provider="aws",
     )
 
 

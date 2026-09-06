@@ -25,14 +25,12 @@ Globals:
     Tracing: Active
     Environment:
       Variables:
-        MEDIA_PROVIDER: aws
         MEDIA_BUCKET: !Ref MediaBucket
         METADATA_TABLE: !Ref MetadataTable
         BEDROCK_MODEL_ID: !Ref BedrockModelId
         BEDROCK_REGION: !Ref BedrockRegion
         ENVIRONMENT: production
         ADMIN_API_KEY: !Ref ApiKey
-        SEED_DEMO_ITEMS: "false"
         CLOUDWATCH_NAMESPACE: AgentSys
   HttpApi:
     CorsConfiguration:
@@ -44,10 +42,12 @@ Globals:
       AllowHeaders:
         - Content-Type
         - X-API-Key
+        - Authorization
       AllowMethods:
         - GET
         - POST
         - PUT
+        - DELETE
         - OPTIONS
       MaxAge: 3000
 
@@ -56,6 +56,13 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: agentsys-ingest-dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  AggregatorStreamDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: agentsys-aggregator-stream-dlq
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
 
@@ -171,6 +178,8 @@ Resources:
     Properties:
       TableName: AgentSysMediaMetadata
       BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
@@ -196,9 +205,10 @@ Resources:
     Properties:
       FunctionName: agentsys-ingest
       Handler: apps.lambda_handlers.ingest.handler
-      CodeUri: ..
+      CodeUri: ../pack
       Timeout: 120
-      ReservedConcurrentExecutions: 2
+      # ReservedConcurrentExecutions omitted: new-account Lambda quota
+      # (UnreservedConcurrentExecution minimum 10) rejects reserved=2.
       Policies:
         - Statement:
             - Sid: ReadMediaObjects
@@ -206,7 +216,10 @@ Resources:
               Action:
                 - s3:GetObject
                 - s3:PutObject
-              Resource: !Sub ${MediaBucket.Arn}/*
+              Resource:
+                - !Sub ${MediaBucket.Arn}/uploads/*
+                - !Sub ${MediaBucket.Arn}/transcripts/*
+                - !Sub ${MediaBucket.Arn}/thumbs/*
             - Sid: RekognitionRead
               Effect: Allow
               Action:
@@ -225,7 +238,11 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
-              Resource: !GetAtt MetadataTable.Arn
+                - dynamodb:Scan
+                - dynamodb:Query
+              Resource:
+                - !GetAtt MetadataTable.Arn
+                - !Sub ${MetadataTable.Arn}/index/category-index
             - Sid: CustomMetrics
               Effect: Allow
               Action:
@@ -239,7 +256,8 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt IngestQueue.Arn
-            BatchSize: 1
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 3
             FunctionResponseTypes:
               - ReportBatchItemFailures
         TranscribeStateChange:
@@ -255,12 +273,74 @@ Resources:
                   - COMPLETED
                   - FAILED
 
+  AggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: agentsys-aggregator
+      Handler: pipeline.aggregator_lambda.handler
+      CodeUri: ../pack
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: DynamoDBStreamAndTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:DescribeStream
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+              Resource:
+                - !GetAtt MetadataTable.Arn
+                - !Sub ${MetadataTable.Arn}/index/*
+                - !Sub ${MetadataTable.Arn}/stream/*
+            - Sid: DynamoDBListStreamsGlobal
+              Effect: Allow
+              Action:
+                - dynamodb:ListStreams
+              Resource: "*"
+            - Sid: BedrockInvocation
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/*
+                - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:inference-profile/*
+            - Sid: SQSStreamDLQAccess
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt AggregatorStreamDLQ.Arn
+            - Sid: CustomMetrics
+              Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: AgentSys
+      Events:
+        StreamTrigger:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt MetadataTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 5
+            MaximumRetryAttempts: 3
+            BisectBatchOnFunctionError: true
+            DestinationConfig:
+              OnFailure:
+                Destination: !GetAtt AggregatorStreamDLQ.Arn
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: agentsys-api
       Handler: apps.lambda_handlers.api.handler
-      CodeUri: ..
+      CodeUri: ../pack
       Timeout: 30
       Events:
         Proxy:
@@ -280,17 +360,38 @@ Resources:
               Action:
                 - s3:PutObject
                 - s3:GetObject
+                - s3:DeleteObject
               Resource: !Sub ${MediaBucket.Arn}/*
-            - Sid: DynamoRead
+            - Sid: DynamoAccess
               Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
+                - dynamodb:DeleteItem
                 - dynamodb:Scan
                 - dynamodb:Query
+                - dynamodb:BatchWriteItem
               Resource:
                 - !GetAtt MetadataTable.Arn
                 - !Sub ${MetadataTable.Arn}/index/category-index
+            - Sid: HealthPings
+              Effect: Allow
+              Action:
+                - sts:GetCallerIdentity
+                - rekognition:ListCollections
+                - transcribe:ListTranscriptionJobs
+                - bedrock:GetFoundationModel
+              Resource: "*"
+            - Sid: HealthBucket
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !GetAtt MediaBucket.Arn
+            - Sid: HealthTable
+              Effect: Allow
+              Action:
+                - dynamodb:DescribeTable
+              Resource: !GetAtt MetadataTable.Arn
             - Sid: BedrockInvoke
               Effect: Allow
               Action:
@@ -385,6 +486,46 @@ Resources:
       LogGroupName: !Sub /aws/lambda/${ApiFunction}
       RetentionInDays: 14
 
+  AggregatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AggregatorFunction}
+      RetentionInDays: 14
+
+  AggregatorErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: agentsys-aggregator-errors
+      AlarmDescription: Fires when the AgentSys aggregator Lambda reports errors.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AggregatorFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  AggregatorStreamDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: agentsys-aggregator-stream-dlq
+      AlarmDescription: Messages landed on the aggregator stream dead-letter queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AggregatorStreamDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   ApiEndpoint:
     Description: HTTP API base URL
@@ -409,3 +550,9 @@ Outputs:
     Value: !Ref IngestErrorAlarm
   IngestDlqAlarmName:
     Value: !Ref IngestDlqAlarm
+  AggregatorFunctionName:
+    Value: !Ref AggregatorFunction
+  AggregatorErrorAlarmName:
+    Value: !Ref AggregatorErrorAlarm
+  AggregatorStreamDlqAlarmName:
+    Value: !Ref AggregatorStreamDlqAlarm

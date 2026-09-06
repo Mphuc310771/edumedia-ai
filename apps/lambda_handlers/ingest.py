@@ -3,8 +3,8 @@ import logging
 from typing import Any, List, Tuple
 from urllib.parse import unquote_plus
 
-from apps.aws.providers import get_runtime, reset_runtime
-from apps.workers.ingestion import ingest_object
+from apps.aws.providers import reset_runtime
+from apps.workers.ingestion import apply_transcribe_job, ingest_object
 
 logger = logging.getLogger(__name__)
 
@@ -37,37 +37,15 @@ def iter_s3_objects(event: dict) -> List[S3Object]:
 
 
 def handle_eventbridge_transcribe(event: dict) -> dict:
-    """
-    Decoupled EventBridge handler for Amazon Transcribe Job State Change.
-    Eliminates blocking polling in Lambda by reacting to async job completion events.
-    """
+    """Write the real transcript into DynamoDB when Amazon Transcribe finishes."""
     detail = event.get("detail", {})
     job_name = detail.get("TranscriptionJobName", "")
     job_status = detail.get("TranscriptionJobStatus", "")
     logger.info("eventbridge_transcribe_event job=%s status=%s", job_name, job_status)
-
-    if job_status == "COMPLETED":
-        # Extract file_id from job_name prefix: agentsys-uploads-seed-lecture-audio.mp3
-        clean = job_name.replace("agentsys-uploads-", "")
-        if clean.endswith(".mp3.json"):
-            file_id = clean[:-9]
-        elif clean.endswith(".json"):
-            file_id = clean[:-5]
-        elif "." in clean:
-            file_id = clean.rsplit(".", 1)[0]
-        else:
-            file_id = clean
-
-        runtime = get_runtime()
-        record = runtime.catalog.get(file_id)
-        if record:
-            record.status = "READY"
-            runtime.catalog.put(record)
-            logger.info("dynamodb_updated_via_eventbridge file_id=%s", file_id)
-            return {"ok": True, "file_id": file_id, "source": "EventBridge"}
-        return {"ok": True, "job_name": job_name, "status": job_status, "source": "EventBridge"}
-
-    return {"ok": True, "job_name": job_name, "status": job_status}
+    result = apply_transcribe_job(job_name, job_status)
+    result.setdefault("ok", True)
+    result.setdefault("source", "EventBridge")
+    return result
 
 
 def handler(event, context):
@@ -89,7 +67,7 @@ def handler(event, context):
                     logger.info("skip_non_upload bucket=%s key=%s", bucket, key)
                     continue
                 filename = key.rsplit("/", 1)[-1]
-                file_id = filename.split(".")[0]
+                file_id = filename.rsplit(".", 1)[0]
                 logger.info("s3_ingest bucket=%s key=%s", bucket, key)
                 item = ingest_object(file_id=file_id, object_key=key, filename=filename)
                 processed.append({"file_id": item.file_id, "status": item.status})
