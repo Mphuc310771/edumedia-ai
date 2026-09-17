@@ -14,10 +14,19 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from apps.aws.providers import get_runtime
 from apps.domain import CATEGORY_LABELS, SUBJECT_LABELS, MediaRecord, infer_category, infer_media_type, infer_subject, resolve_subject, usable_ocr_text
+from pipeline.aggregator_lambda import reduce_and_finalize
+from pipeline.chunk_state import (
+    MemoryChunkStore,
+    init_file_pipeline_state,
+    mark_chunk_completed,
+    save_chunks_batch,
+)
+from pipeline.chunking import chunk_transcribe_json
+from pipeline.tier1_extract import extract_smart_summary
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +369,36 @@ def find_record_for_transcribe_job(job_name: str) -> Optional[MediaRecord]:
     return None
 
 
+def _refine_chunk_with_bedrock(
+    chunk_text: str,
+    bedrock_client: Any = None,
+    model_id: str = "amazon.nova-lite-v1:0",
+) -> str:
+    """Summarize an individual transcript chunk using Bedrock Nova Lite."""
+    if not chunk_text or not chunk_text.strip():
+        return ""
+    if bedrock_client is None:
+        clean = chunk_text.strip().split("\n")[0].split(". ")[0].strip()
+        return (clean[:190] + "...") if len(clean) > 190 else clean
+
+    system_prompt = (
+        "Bạn là trợ lý AI học thuật cho AgentSys. Hãy tóm tắt đoạn bài giảng sau thành 1-2 câu ngắn gọn, "
+        "giữ lại các thuật ngữ chuyên ngành quan trọng và mốc thời gian nếu có. Trả về văn bản thuần không markdown."
+    )
+    try:
+        response = bedrock_client.converse(
+            modelId=model_id,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": chunk_text}]}],
+            inferenceConfig={"maxTokens": 150, "temperature": 0},
+        )
+        return response["output"]["message"]["content"][0]["text"].strip()
+    except Exception as exc:
+        logger.warning("Bedrock chunk refine failed: %s. Using truncated text.", exc)
+        clean = chunk_text.strip().split("\n")[0].split(". ")[0].strip()
+        return (clean[:190] + "...") if len(clean) > 190 else clean
+
+
 def apply_transcribe_job(job_name: str, job_status: str) -> dict:
     runtime = get_runtime()
     record = find_record_for_transcribe_job(job_name)
@@ -376,8 +415,15 @@ def apply_transcribe_job(job_name: str, job_status: str) -> dict:
 
     speech = runtime.speech
     transcript = ""
-    if hasattr(speech, "read_job_transcript"):
+    transcribe_payload: dict = {}
+    if hasattr(speech, "read_job_payload"):
+        transcribe_payload = speech.read_job_payload(job_name)
+        transcripts = transcribe_payload.get("results", {}).get("transcripts", [])
+        if transcripts and transcripts[0].get("transcript"):
+            transcript = transcripts[0].get("transcript", "").strip()
+    if not transcript and hasattr(speech, "read_job_transcript"):
         transcript = speech.read_job_transcript(job_name)
+
     if not transcript:
         record.status = "FAILED"
         record.error = "Transcribe COMPLETED but transcript could not be read"
@@ -401,12 +447,55 @@ def apply_transcribe_job(job_name: str, job_status: str) -> dict:
         bedrock_client=bedrock_client,
     )
     record.subject = resolve_subject(record)
-    record.summary = _build_summary(record)
+
+    # 1. Tier 1 Fast Extraction: Independent Announcements & Topic Overview (~10-50ms)
+    tier1_meta = extract_smart_summary(transcript)
+    announcements = tier1_meta.get("announcements", [])
+    topic_summary = tier1_meta.get("topic_summary", "")
+
+    provisional_parts = []
+    if announcements:
+        provisional_parts.append("Lịch & Thông báo: " + " · ".join(announcements))
+    if topic_summary:
+        provisional_parts.append(topic_summary)
+    provisional_summary = " · ".join(provisional_parts) if provisional_parts else _build_summary(record)
+
+    record.summary = provisional_summary
+    record.pipeline_status = "PROVISIONAL_READY"
     record.status = "READY"
     record.error = None
     record.analysis_source = "transcribe"
     _maybe_embed(record)
     runtime.catalog.put(record)
     runtime.metrics.emit("MediaIngested", 1)
+    logger.info("tier1_provisional_ready file_id=%s summary=%r", record.file_id, provisional_summary[:100])
+
+    # 2. Tier 2: Silence & Segment-Aware Chunking & Map-Reduce Dispatch
+    table = getattr(runtime.catalog, "table", None)
+    store_or_table = table if table is not None else MemoryChunkStore()
+
+    payload_for_chunking = transcribe_payload or {"results": {"transcripts": [{"transcript": transcript}]}}
+    chunks = chunk_transcribe_json(payload_for_chunking, record.file_id)
+
+    if chunks:
+        logger.info("tier2_chunking_start file_id=%s total_chunks=%d", record.file_id, len(chunks))
+        init_file_pipeline_state(store_or_table, record.file_id, total_chunks=len(chunks), provisional_summary=tier1_meta)
+        save_chunks_batch(store_or_table, record.file_id, chunks)
+
+        # Refine each chunk with Bedrock Nova Lite
+        model_id = getattr(runtime.planner, "model_id", "amazon.nova-lite-v1:0")
+        for chunk in chunks:
+            chunk_summary = _refine_chunk_with_bedrock(chunk.text, bedrock_client=bedrock_client, model_id=model_id)
+            mark_chunk_completed(store_or_table, record.file_id, chunk.chunk_index, chunk_summary=chunk_summary)
+
+        # Reduce & Finalize Phase
+        reduce_result = reduce_and_finalize(record.file_id, store_or_table=store_or_table)
+        final_summary = reduce_result.get("final_summary")
+        if final_summary:
+            record.summary = final_summary
+            record.pipeline_status = "REFINED_COMPLETED"
+            runtime.catalog.put(record)
+            logger.info("tier2_map_reduce_completed file_id=%s final_summary=%r", record.file_id, final_summary[:100])
+
     logger.info("dynamodb_transcript_updated file_id=%s", record.file_id)
     return {"ok": True, "file_id": record.file_id, "status": "READY", "source": "EventBridge"}

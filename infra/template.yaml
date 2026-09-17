@@ -32,6 +32,7 @@ Globals:
         ENVIRONMENT: production
         ADMIN_API_KEY: !Ref ApiKey
         CLOUDWATCH_NAMESPACE: AgentSys
+        INGEST_QUEUE_URL: !Ref IngestQueue
   HttpApi:
     CorsConfiguration:
       AllowOrigins:
@@ -66,12 +67,35 @@ Resources:
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
 
+  TranscribeEventDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: agentsys-transcribe-dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  TranscribeEventDLQPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref TranscribeEventDLQ
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToSendToTranscribeDLQ
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt TranscribeEventDLQ.Arn
+
   IngestQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: agentsys-ingest-queue
       VisibilityTimeout: 180
       MessageRetentionPeriod: 86400
+      ReceiveMessageWaitTimeSeconds: 10
       SqsManagedSseEnabled: true
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt IngestDLQ.Arn
@@ -272,6 +296,11 @@ Resources:
                 TranscriptionJobStatus:
                   - COMPLETED
                   - FAILED
+            DeadLetterConfig:
+              Arn: !GetAtt TranscribeEventDLQ.Arn
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 86400
+              MaximumRetryAttempts: 3
 
   AggregatorFunction:
     Type: AWS::Serverless::Function
@@ -408,6 +437,11 @@ Resources:
               Condition:
                 StringEquals:
                   cloudwatch:namespace: AgentSys
+            - Sid: IngestQueueSend
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt IngestQueue.Arn
 
   IngestErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -526,6 +560,23 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
+  TranscribeDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: agentsys-transcribe-dlq
+      AlarmDescription: Messages landed on the transcribe event dead-letter queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt TranscribeEventDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   ApiEndpoint:
     Description: HTTP API base URL
@@ -542,6 +593,9 @@ Outputs:
   IngestDlqUrl:
     Description: Dead-letter queue for failed ingest messages
     Value: !Ref IngestDLQ
+  TranscribeDlqUrl:
+    Description: Dead-letter queue for failed Transcribe EventBridge events
+    Value: !Ref TranscribeEventDLQ
   IngestFunctionName:
     Value: !Ref IngestFunction
   ApiFunctionName:
@@ -550,6 +604,8 @@ Outputs:
     Value: !Ref IngestErrorAlarm
   IngestDlqAlarmName:
     Value: !Ref IngestDlqAlarm
+  TranscribeDlqAlarmName:
+    Value: !Ref TranscribeDlqAlarm
   AggregatorFunctionName:
     Value: !Ref AggregatorFunction
   AggregatorErrorAlarmName:

@@ -1,0 +1,545 @@
+# Script to generate production-ready AWS Architecture Diagram for AgentSys (Clean Core Flow Edition)
+# Streamlined layout:
+# 1. Removed unnecessary outer runtime bounding boxes and floating auth badges.
+# 2. API Gateway cleanly annotated with "HTTP API ($default) · JWT Auth".
+# 3. Cleaned out backward wires across canvas ([I7c] and Transcribe S3 back-wires).
+# 4. CloudWatch stands 100% independent as a Passive Observability Dashboard.
+# 5. Aggregator simplified: Nova Lite Map-Reduce integrated directly into Aggregator subtitle, eliminating 3rd Bedrock icon.
+# 6. Smooth forward dataflow: [S1]->[S8] and [I1]->[I10].
+
+import html
+import json
+import os
+import time
+
+def build_xml():
+    xml = f'''<mxfile host="app.diagrams.net" agent="Mozilla/5.0">
+  <diagram id="AgentSys-Master-Clean" name="AgentSys Multimodal Serverless Architecture">
+    <mxGraphModel dx="2025" dy="1022" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1000" background="#F8FAFC" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ========================================================================= -->
+        <!-- HEADER ZONE                                                               -->
+        <!-- ========================================================================= -->
+        <mxCell id="u_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontFamily=Helvetica;fontColor=#0F172A;" value="AgentSys: Enterprise Multimodal Serverless Search &amp; Discovery Architecture" vertex="1">
+          <mxGeometry height="32" width="1300" x="40" y="24" as="geometry" />
+        </mxCell>
+        <mxCell id="u_subtitle" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontStyle=0;fontFamily=Helvetica;fontColor=#475569;" value="Decoupled Event-Driven Ingestion (Rekognition, Transcribe, Bedrock) + Sub-Second Grounded Hybrid Search (Dense Vector 256-d + BM25)" vertex="1">
+          <mxGeometry height="20" width="1300" x="40" y="56" as="geometry" />
+        </mxCell>
+
+        <!-- ========================================================================= -->
+        <!-- TRACK 1: HYBRID SEARCH & GROUNDED RAG LIFECYCLE (SYNCHRONOUS LOW-LATENCY) -->
+        <!-- Container Box (x = 25, y = 82, w = 1870, h = 295)                         -->
+        <!-- ========================================================================= -->
+        <mxCell id="u_box_track1" parent="1" style="rounded=1;strokeWidth=1.5;dashed=1;html=1;verticalAlign=top;align=left;spacingLeft=15;spacingTop=10;fontFamily=Helvetica;strokeColor=#7C3AED;fillColor=#FAF5FF;fillOpacity=40;" value="" vertex="1">
+          <mxGeometry height="295" width="1870" x="25" y="82" as="geometry" />
+        </mxCell>
+        <mxCell id="u_badge_track1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#7C3AED;strokeWidth=1.2;fontColor=#7C3AED;fontSize=10;fontFamily=Helvetica;align=center;verticalAlign=middle;" value="&lt;b&gt;Track 1: Hybrid Search &amp;amp; Grounded RAG Lifecycle&lt;/b&gt; (Synchronous · Low Latency)" vertex="1">
+          <mxGeometry height="22" width="410" x="175" y="86" as="geometry" />
+        </mxCell>
+
+        <!-- 1. Client App / User (x = 60, y = 145) -->
+        <mxCell id="lbl_u_client" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=bottom;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Client App / User&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Browser / React UI&lt;br&gt;Direct S3 Upload&lt;/font&gt;" vertex="1">
+          <mxGeometry height="48" width="136" x="20" y="88" as="geometry" />
+        </mxCell>
+        <mxCell id="u_client" parent="1" style="sketch=0;outlineConnect=0;fontColor=#FFFFFF;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user;fillColor=#232F3E;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="60" y="145" as="geometry" />
+        </mxCell>
+
+        <!-- 2. Amazon API Gateway (x = 320, y = 145) -->
+        <mxCell id="u_apigw" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#BE185D;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="320" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_apigw" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=nowrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon API Gateway&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;HTTP API ($default) · JWT Auth&lt;br&gt;/agent/query &amp;amp; /upload-url&lt;/font&gt;" vertex="1">
+          <mxGeometry height="34" width="180" x="258" y="207" as="geometry" />
+        </mxCell>
+
+        <!-- 3. Lambda (API Service) (Shifted to x = 720, y = 150) -->
+        <mxCell id="lbl_u_lambda_api" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=bottom;whiteSpace=nowrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Lambda (API Service)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;agentsys-api (FastAPI)&lt;/font&gt;&lt;br&gt;&lt;font color=&quot;#2563EB&quot;&gt;Search Orchestrator&lt;/font&gt;" vertex="1">
+          <mxGeometry height="45" width="140" x="678" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="u_lambda_api" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#EA580C;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="720" y="150" as="geometry" />
+        </mxCell>
+
+        <!-- 4. In-Memory Hybrid Ranker (Directly underneath Lambda API, center x = 748, y = 258) -->
+        <mxCell id="u_box_ranker" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;strokeWidth=1.5;align=center;verticalAlign=top;fontFamily=Helvetica;fontColor=#B45309;fontSize=10;" value="&lt;b&gt;In-Memory Hybrid Ranker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#B45309&quot; style=&quot;font-size:9px;&quot;&gt;[ Python In-Process RAM Module: apps.agent.search ]&lt;/font&gt;&lt;hr style=&quot;margin:3px 0; border:0; border-top:1px solid #FDE68A;&quot;&gt;&lt;div style=&quot;font-size:8.5px; color:#92400E; text-align:left; line-height:1.35; padding-left:4px;&quot;&gt;• Zero network I/O overhead (In-Process)&lt;br&gt;• Vector Cosine Sim (0.6) + BM25 (0.4)&lt;br&gt;• &lt;b&gt;Top-3 Grounded Snippets Extraction&lt;/b&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="104" width="186" x="655" y="258" as="geometry" />
+        </mxCell>
+
+        <!-- 5. Amazon Bedrock Container Box (x = 1120, y = 104, w = 440, h = 170) -->
+        <mxCell id="u_box_bedrock" parent="1" style="rounded=1;strokeWidth=1.5;dashed=1;html=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontFamily=Helvetica;strokeColor=#7C3AED;fillColor=#FAF5FF;fontColor=#6B21A8;fontSize=10;" value="&lt;b&gt;Amazon Bedrock&lt;/b&gt; &lt;font color=&quot;#7C3AED&quot;&gt;(Search &amp;amp; RAG AI Cluster)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="170" width="440" x="1120" y="104" as="geometry" />
+        </mxCell>
+
+        <!-- Bedrock Model A: Nova Lite (x = 1180, y = 145) -->
+        <mxCell id="u_t1_nova" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.bedrock;fillColor=#6B21A8;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1180" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_t1_nova" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Nova Lite&lt;/b&gt; (LLM Reasoning &amp;amp; RAG)&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• &lt;b&gt;[S3a]&lt;/b&gt; Intent Planning &amp;amp; Filters&lt;br&gt;• &lt;b&gt;[S5-S6]&lt;/b&gt; Grounded RAG Synthesis&lt;/font&gt;" vertex="1">
+          <mxGeometry height="42" width="186" x="1115" y="207" as="geometry" />
+        </mxCell>
+
+        <!-- Bedrock Model B: Titan Text v2 (x = 1410, y = 145) -->
+        <mxCell id="u_t1_titan" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.bedrock;fillColor=#4A1D96;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1410" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_t1_titan" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Titan Text v2&lt;/b&gt; (Embeddings)&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• &lt;b&gt;[S3b]&lt;/b&gt; 256-d Native / Fallback v1&lt;br&gt;• Dense Semantic Vector Space&lt;/font&gt;" vertex="1">
+          <mxGeometry height="42" width="176" x="1350" y="207" as="geometry" />
+        </mxCell>
+
+        <!-- 6. Amazon CloudWatch (Cross-Cutting Observability Pillar, x = 1580, y = 95, w = 245) -->
+        <mxCell id="u_box_cw" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F97316;strokeWidth=1.2;align=center;verticalAlign=top;fontFamily=Helvetica;fontColor=#C2410C;fontSize=9.5;" value="&lt;b&gt;Amazon CloudWatch&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#EA580C&quot; style=&quot;font-size:8.5px;&quot;&gt;[ Cross-Cutting Observability Pillar ]&lt;/font&gt;&lt;hr style=&quot;margin:3px 0; border:0; border-top:1px solid #FED7AA;&quot;&gt;&lt;div style=&quot;font-size:8.5px; color:#9A3412; text-align:left; line-height:1.4;&quot;&gt;• &lt;b&gt;Out-of-Band Telemetry &amp;amp; Logs&lt;/b&gt;&lt;br&gt;• 3 Log Groups: /aws/lambda/agentsys-*&lt;br&gt;• &lt;b&gt;Metrics:&lt;/b&gt; SearchQueries, MediaIngested&lt;br&gt;• 6 Alarms: Lambda Errors &amp;amp; DLQ Backlogs&lt;/div&gt;" vertex="1">
+          <mxGeometry height="120" width="245" x="1580" y="95" as="geometry" />
+        </mxCell>
+
+        <!-- ========================================================================= -->
+        <!-- TRACK 2: MULTIMODAL INGESTION & 2-TIER PROCESSING PIPELINE (EVENT-DRIVEN) -->
+        <!-- Container Box (x = 25, y = 395, w = 1870, h = 480)                        -->
+        <!-- ========================================================================= -->
+        <mxCell id="u_box_track2" parent="1" style="rounded=1;strokeWidth=1.5;dashed=1;html=1;verticalAlign=top;align=left;spacingLeft=15;spacingTop=10;fontFamily=Helvetica;strokeColor=#15803D;fillColor=#F0FDF4;fillOpacity=40;" value="" vertex="1">
+          <mxGeometry height="480" width="1870" x="25" y="395" as="geometry" />
+        </mxCell>
+        <mxCell id="u_badge_track2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#15803D;strokeWidth=1.2;fontColor=#15803D;fontSize=10;fontFamily=Helvetica;align=center;verticalAlign=middle;" value="&lt;b&gt;Track 2: Multimodal Ingestion &amp;amp; 2-Tier Processing Pipeline&lt;/b&gt; (Event-Driven Asynchronous)" vertex="1">
+          <mxGeometry height="22" width="450" x="100" y="404" as="geometry" />
+        </mxCell>
+
+        <!-- 1. Amazon S3 Bucket (x = 320, y = 480) -->
+        <mxCell id="u_s3" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;fillColor=#16A34A;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="320" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_s3" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon S3 Bucket&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;&lt;b&gt;uploads/&lt;/b&gt; (Raw Media)&lt;br&gt;&lt;b&gt;transcripts/&lt;/b&gt; (ASR JSON)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="36" width="156" x="270" y="542" as="geometry" />
+        </mxCell>
+
+        <!-- 2. Amazon SQS Buffer (x = 580, y = 480) -->
+        <mxCell id="u_sqs" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs;fillColor=#BE185D;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="580" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_sqs" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon SQS Buffer&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;agentsys-ingest-queue&lt;br&gt;Batch: 5 msgs / 10s window&lt;/font&gt;" vertex="1">
+          <mxGeometry height="36" width="166" x="525" y="542" as="geometry" />
+        </mxCell>
+
+        <!-- Ingest DLQ (x = 580, y = 660) -->
+        <mxCell id="u_sqs_dlq" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs;fillColor=#DC2626;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="580" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_sqs_dlq" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#DC2626;" value="&lt;b&gt;&lt;font color=&quot;#DC2626&quot;&gt;Ingest DLQ&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#DC2626&quot;&gt;agentsys-ingest-dlq&lt;br&gt;maxReceiveCount: 3&lt;/font&gt;" vertex="1">
+          <mxGeometry height="34" width="156" x="530" y="722" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_sqs_max" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DC2626;strokeWidth=1.2;align=center;verticalAlign=middle;fontSize=9.5;fontFamily=Helvetica;" value="&lt;font color=&quot;#DC2626&quot;&gt;maxReceiveCount: 3&lt;/font&gt;" vertex="1">
+          <mxGeometry height="20" width="115" x="550" y="598" as="geometry" />
+        </mxCell>
+
+        <!-- 3. Lambda (Ingest Worker) (x = 840, y = 480) -->
+        <mxCell id="lbl_u_lambda_ingest" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=bottom;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Lambda (Ingest Worker)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;agentsys-ingest-worker&lt;/font&gt;&lt;br&gt;&lt;font color=&quot;#EA580C&quot;&gt;SQS Batch: 5 · Tier 1 &amp;amp; 2&lt;/font&gt;" vertex="1">
+          <mxGeometry height="48" width="156" x="790" y="415" as="geometry" />
+        </mxCell>
+        <mxCell id="u_lambda_ingest" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#EA580C;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="840" y="480" as="geometry" />
+        </mxCell>
+
+        <!-- 4. Amazon DynamoDB Table (x = 1320, y = 480) -->
+        <mxCell id="u_dynamo" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;fillColor=#2563EB;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1320" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_dynamo" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon DynamoDB&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Table: AgentSysMetadata&lt;br&gt;&lt;b&gt;GSI: category-index&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="36" width="166" x="1265" y="542" as="geometry" />
+        </mxCell>
+
+        <!-- DynamoDB Streams (x = 1410, y = 488) -->
+        <mxCell id="u_streams" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#2563EB;strokeWidth=1.5;fontSize=9;fontFamily=Helvetica;fontColor=#1E40AF;align=center;verticalAlign=middle;" value="&lt;b&gt;DynamoDB Streams&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1E40AF&quot; style=&quot;font-size:8.5px;&quot;&gt;NEW_AND_OLD_IMAGES&lt;br&gt;CDC Event Trigger&lt;/font&gt;" vertex="1">
+          <mxGeometry height="40" width="124" x="1410" y="488" as="geometry" />
+        </mxCell>
+
+        <!-- 5. Lambda (Aggregator) (x = 1690, y = 480) -->
+        <mxCell id="lbl_u_agg" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Lambda (Aggregator)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;agentsys-aggregator&lt;/font&gt;&lt;br&gt;&lt;font color=&quot;#2563EB&quot;&gt;Idempotent Chunk &amp;amp; State Reduce&lt;/font&gt;" vertex="1">
+          <mxGeometry height="45" width="180" x="1756" y="442" as="geometry" />
+        </mxCell>
+        <mxCell id="u_agg" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#EA580C;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1690" y="480" as="geometry" />
+        </mxCell>
+
+        <!-- Stream DLQ (x = 1690, y = 660) -->
+        <mxCell id="u_stream_dlq" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs;fillColor=#DC2626;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1690" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_stream_dlq" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#DC2626;" value="&lt;b&gt;&lt;font color=&quot;#DC2626&quot;&gt;Stream DLQ&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#DC2626&quot;&gt;stream-dlq&lt;br&gt;BisectBatchError&lt;/font&gt;" vertex="1">
+          <mxGeometry height="32" width="115" x="1756" y="672" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_agg_dlq_pill" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DC2626;strokeWidth=1.2;align=center;verticalAlign=middle;fontSize=9.5;fontFamily=Helvetica;" value="&lt;font color=&quot;#DC2626&quot;&gt;BisectBatchError&lt;/font&gt;" vertex="1">
+          <mxGeometry height="20" width="115" x="1660" y="618" as="geometry" />
+        </mxCell>
+
+        <!-- ========================================================================= -->
+        <!-- MULTIMODAL AI ENRICHMENT SUB-LAYER (3 AI SERVICES ONLY)                    -->
+        <!-- Container Box (x = 730, y = 640, w = 390, h = 165)                        -->
+        <!-- ========================================================================= -->
+        <mxCell id="u_box_ai_sublayer" parent="1" style="rounded=1;strokeWidth=1.5;dashed=1;html=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontFamily=Helvetica;strokeColor=#0D9488;fillColor=#F0FDFA;fontColor=#0F766E;fontSize=10;" value="&lt;b&gt;Multimodal AI Enrichment Sub-Layer&lt;/b&gt; &lt;font color=&quot;#0D9488&quot;&gt;(Inference Delegated Execution)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="165" width="390" x="730" y="640" as="geometry" />
+        </mxCell>
+
+        <!-- Rekognition (x = 750, y = 670) -->
+        <mxCell id="u_rek" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rekognition;fillColor=#0D9488;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="750" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_rek" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon Rekognition&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;DetectLabels &amp;amp; OCR&lt;/font&gt;" vertex="1">
+          <mxGeometry height="34" width="120" x="718" y="732" as="geometry" />
+        </mxCell>
+
+        <!-- Bedrock Titan 256-d & Nova (x = 880, y = 670) -->
+        <mxCell id="u_t2_titan" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.bedrock;fillColor=#6B21A8;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="880" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_t2_titan" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon Bedrock&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Titan v2 (256-d) &amp;amp; Nova&lt;/font&gt;" vertex="1">
+          <mxGeometry height="34" width="120" x="848" y="732" as="geometry" />
+        </mxCell>
+
+        <!-- Transcribe (x = 1010, y = 670) -->
+        <mxCell id="u_transcribe" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.transcribe;fillColor=#4338CA;" value="" vertex="1">
+          <mxGeometry height="56" width="56" x="1010" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_transcribe" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9.5;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;Amazon Transcribe&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;Async ASR (vi-VN)&lt;br&gt;Output: S3 transcripts/&lt;/font&gt;" vertex="1">
+          <mxGeometry height="42" width="136" x="970" y="732" as="geometry" />
+        </mxCell>
+
+        <!-- EventBridge Rule (OUTSIDE AI Sub-Layer Box, x = 1215, y = 674) -->
+        <mxCell id="u_eb" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eventbridge;fillColor=#E11D48;" value="" vertex="1">
+          <mxGeometry height="48" width="48" x="1215" y="674" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl_u_eb" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=9;fontFamily=Helvetica;fontColor=#0F172A;" value="&lt;b&gt;EventBridge Rule&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;State: COMPLETED&lt;/font&gt;" vertex="1">
+          <mxGeometry height="32" width="128" x="1175" y="732" as="geometry" />
+        </mxCell>
+
+        <!-- ========================================================================= -->
+        <!-- CONNECTORS / EDGES (CLEAN STREAMLINED FLOW)                               -->
+        <!-- ========================================================================= -->
+
+        <!-- [S1, I1] User -> APIGW -->
+        <mxCell id="ue_s1" edge="1" parent="1" source="u_client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#7C3AED;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.35;entryX=0;entryY=0.35;" target="u_apigw" value="&lt;b&gt;[S1, I1]&lt;/b&gt; Query / Presign Request">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [S8, I2] APIGW -> User -->
+        <mxCell id="ue_s8_client" edge="1" parent="1" source="u_apigw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#BE185D;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.65;entryX=1;entryY=0.65;" target="u_client" value="&lt;b&gt;[S8, I2]&lt;/b&gt; HTTP 200 (Answer / Upload URL)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [S2, I1a] Proxy & [S7, I1b] Return: APIGW <-> Lambda API -->
+        <mxCell id="ue_s2" edge="1" parent="1" source="u_apigw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9;fontFamily=Helvetica;strokeColor=#EA580C;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;exitX=1;exitY=0.45;entryX=0;entryY=0.45;" target="u_lambda_api" value="&lt;b&gt;[S2, I1a]&lt;/b&gt; Proxy &amp;amp; &lt;b&gt;[S7, I1b]&lt;/b&gt; Return">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- In-Process Hybrid Scoring: Lambda API <-> In-Memory Hybrid Ranker -->
+        <mxCell id="ue_ranker" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=none;html=1;strokeWidth=1.8;fontSize=8.5;fontFamily=Helvetica;strokeColor=#F59E0B;fontColor=#92400E;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="u_box_ranker" value="&lt;b&gt;In-Process Scoring Call&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-65" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Telemetry: Lambda API -> CloudWatch (Clean top corridor at y = 65) -->
+        <mxCell id="ue_cw_telemetry" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.5;fontSize=8.5;fontFamily=Helvetica;strokeColor=#F97316;fontColor=#9A3412;labelBackgroundColor=#FFFFFF;dashed=1;exitX=1;exitY=0.08;entryX=0;entryY=0.25;" target="u_box_cw" value="&lt;b&gt;Auto-Telemetry &amp;amp; Logs&lt;/b&gt;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-70" as="offset" />
+            <Array as="points">
+              <mxPoint x="855" y="154" />
+              <mxPoint x="855" y="65" />
+              <mxPoint x="1580" y="65" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [S3b] Lambda API <-> Bedrock Titan (256-d Embed Request & Return Vector) -->
+        <mxCell id="ue_s3b" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9;fontFamily=Helvetica;strokeColor=#7C3AED;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;startSize=7;endSize=7;exitX=1;exitY=0.20;entryX=0.5;entryY=0;" target="u_t1_titan" value="&lt;b&gt;[S3b]&lt;/b&gt; 256-d Vector (Embed &amp;amp; Return)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-60" as="offset" />
+            <Array as="points">
+              <mxPoint x="835" y="161" />
+              <mxPoint x="835" y="92" />
+              <mxPoint x="1438" y="92" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [S3a] Lambda API -> Nova Lite (Intent Planning & Filter Extraction) -->
+        <mxCell id="ue_s3a" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9;fontFamily=Helvetica;strokeColor=#7C3AED;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;exitX=1;exitY=0.38;entryX=0;entryY=0.25;" target="u_t1_nova" value="&lt;b&gt;[S3a]&lt;/b&gt; Intent &amp;amp; Filter Extraction (2-Way)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="30" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [S5] Lambda API -> Nova Lite (Context + Prompt) -->
+        <mxCell id="ue_s5_rag" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9;fontFamily=Helvetica;strokeColor=#7C3AED;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.56;entryX=0;entryY=0.5;" target="u_t1_nova" value="&lt;b&gt;[S5]&lt;/b&gt; Context + Prompt">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-30" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [S6] Nova Lite -> Lambda API (Synthesized Answer) -->
+        <mxCell id="ue_s6_ans" edge="1" parent="1" source="u_t1_nova" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9;fontFamily=Helvetica;strokeColor=#9333EA;fontColor=#334155;labelBackgroundColor=#FFFFFF;dashed=1;exitX=0;exitY=0.75;entryX=1;entryY=0.74;" target="u_lambda_api" value="&lt;b&gt;[S6]&lt;/b&gt; Synthesized Answer">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="30" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [S4] GSI Query: Lambda API <-> DynamoDB (2-way Query GSI & Return Candidates) -->
+        <mxCell id="ue_s4" edge="1" parent="1" source="u_lambda_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#2563EB;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;startSize=7;endSize=7;exitX=1;exitY=0.90;entryX=0.5;entryY=0;" target="u_dynamo" value="&lt;b&gt;[S4]&lt;/b&gt; Query GSI &amp;amp; Return Candidates (2-Way)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" as="offset" />
+            <Array as="points">
+              <mxPoint x="845" y="200" />
+              <mxPoint x="845" y="315" />
+              <mxPoint x="1348" y="315" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I3] Direct PUT: Client -> S3 (Clean margin route into Track 2) -->
+        <mxCell id="ue_i3_client_s3" edge="1" parent="1" source="u_client" style="edgeStyle=none;rounded=1;html=1;strokeWidth=2.2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#16A34A;fontColor=#15803D;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="u_s3" value="&lt;b&gt;[I3]&lt;/b&gt; Direct PUT uploads/">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="40" y="-12" as="offset" />
+            <Array as="points">
+              <mxPoint x="88" y="450" />
+              <mxPoint x="348" y="450" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I4] S3 -> SQS -->
+        <mxCell id="ue_i4_s3_sqs" edge="1" parent="1" source="u_s3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#16A34A;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="u_sqs" value="&lt;b&gt;[I4]&lt;/b&gt; s3:ObjectCreated:*">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SQS -> Ingest DLQ -->
+        <mxCell id="ue_sqs_dlq" edge="1" parent="1" source="u_sqs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;strokeColor=#DC2626;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="u_sqs_dlq" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [I5] SQS -> Worker -->
+        <mxCell id="ue_i5_sqs_worker" edge="1" parent="1" source="u_sqs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#BE185D;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.35;" target="u_lambda_ingest" value="&lt;b&gt;[I5]&lt;/b&gt; SQS Batch: 5">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-20" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I6d] PutItem (Metadata + Vector) - Solid Line on Top -->
+        <mxCell id="ue_i6d_dynamo" edge="1" parent="1" source="u_lambda_ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2.2;fontSize=9.5;fontFamily=Helvetica;strokeColor=#2563EB;fontColor=#1E40AF;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.15;entryX=0;entryY=0.15;" target="u_dynamo" value="&lt;b&gt;[I6d] PutItem&lt;/b&gt; (Metadata + Vector)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [I8] UpdateItem (Transcript & Refine) - Dashed Line on Bottom -->
+        <mxCell id="ue_i8_update" edge="1" parent="1" source="u_lambda_ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9.5;fontFamily=Helvetica;strokeColor=#2563EB;fontColor=#1E40AF;labelBackgroundColor=#FFFFFF;dashed=1;exitX=1;exitY=0.55;entryX=0;entryY=0.55;" target="u_dynamo" value="&lt;b&gt;[I8] UpdateItem&lt;/b&gt; (Transcript &amp;amp; Refine)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- DynamoDB -> Streams -->
+        <mxCell id="ue_i8_stream" edge="1" parent="1" source="u_dynamo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2563EB;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="u_streams" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [I9] Streams -> Aggregator CDC Trigger -->
+        <mxCell id="ue_i9_agg" edge="1" parent="1" source="u_streams" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9.5;fontFamily=Helvetica;strokeColor=#EA580C;fontColor=#334155;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="u_agg" value="&lt;b&gt;[I9]&lt;/b&gt; CDC Stream Trigger">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Aggregator -> Stream DLQ -->
+        <mxCell id="ue_agg_dlq" edge="1" parent="1" source="u_agg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;strokeColor=#DC2626;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="u_stream_dlq" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- [I10] Aggregator -> DynamoDB Atomic Update -->
+        <mxCell id="ue_i10_update" edge="1" parent="1" source="u_agg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=9.5;fontFamily=Helvetica;strokeColor=#2563EB;fontColor=#334155;labelBackgroundColor=#FFFFFF;dashed=1;exitX=0.5;exitY=0;entryX=0.8;entryY=0;" target="u_dynamo" value="&lt;b&gt;[I10]&lt;/b&gt; Atomic Update (REFINED_COMPLETED)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1718" y="435" />
+              <mxPoint x="1365" y="435" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I6a] Worker <-> Rekognition -->
+        <mxCell id="ue_i6a" edge="1" parent="1" source="u_lambda_ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=8.5;fontFamily=Helvetica;strokeColor=#0D9488;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;exitX=0.2;exitY=1;entryX=0.5;entryY=0;" target="u_rek" value="&lt;b&gt;[I6a]&lt;/b&gt; DetectLabels &amp;amp; OCR">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-12" y="15" as="offset" />
+            <Array as="points">
+              <mxPoint x="851" y="565" />
+              <mxPoint x="778" y="565" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I6b] Worker <-> Bedrock Titan 256-d -->
+        <mxCell id="ue_i6b_titan" edge="1" parent="1" source="u_lambda_ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=8.5;fontFamily=Helvetica;strokeColor=#7C3AED;fontColor=#334155;labelBackgroundColor=#FFFFFF;startArrow=classic;endArrow=classic;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="u_t2_titan" value="&lt;b&gt;[I6b]&lt;/b&gt; 256-d Embeddings">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="10" y="15" as="offset" />
+            <Array as="points">
+              <mxPoint x="868" y="595" />
+              <mxPoint x="908" y="595" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I6c] Worker -> Transcribe -->
+        <mxCell id="ue_i6c" edge="1" parent="1" source="u_lambda_ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=8.5;fontFamily=Helvetica;strokeColor=#4338CA;fontColor=#3730A3;labelBackgroundColor=#FFFFFF;exitX=0.8;exitY=1;entryX=0.5;entryY=0;" target="u_transcribe" value="&lt;b&gt;[I6c]&lt;/b&gt; Start ASR (vi-VN)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="35" as="offset" />
+            <Array as="points">
+              <mxPoint x="885" y="565" />
+              <mxPoint x="1038" y="565" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I7a] Transcribe -> EventBridge Rule (OUTSIDE AI sublayer box) -->
+        <mxCell id="ue_transcribe_eb" edge="1" parent="1" source="u_transcribe" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=8;fontFamily=Helvetica;strokeColor=#DC2626;fontColor=#334155;labelBackgroundColor=#FFFFFF;align=center;verticalAlign=middle;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="u_eb" value="&lt;b&gt;[I7a] Job State Change&lt;/b&gt;&lt;br&gt;(COMPLETED)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- [I7b] EventBridge Rule -> Worker Callback (Clean corridor between AI sublayer and Worker) -->
+        <mxCell id="ue_eb_callback" edge="1" parent="1" source="u_eb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.8;fontSize=8.5;fontFamily=Helvetica;strokeColor=#DC2626;fontColor=#334155;labelBackgroundColor=#FFFFFF;dashed=1;exitX=0.5;exitY=0;entryX=1;entryY=0.85;" target="u_lambda_ingest" value="&lt;b&gt;[I7b]&lt;/b&gt; Callback (S3 Transcript URI)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" as="offset" />
+            <Array as="points">
+              <mxPoint x="1239" y="605" />
+              <mxPoint x="925" y="605" />
+              <mxPoint x="925" y="528" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ========================================================================= -->
+        <!-- IAM SECURITY FOUNDATION FOOTER BAR                                        -->
+        <!-- ========================================================================= -->
+        <mxCell id="u_bar_iam" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF2F2;strokeColor=#DC2626;strokeWidth=1.2;fontColor=#991B1B;fontSize=10;fontFamily=Helvetica;align=center;verticalAlign=middle;" value="&lt;b&gt;AWS IAM Security Foundation&lt;/b&gt;: Least-Privilege Scoped Roles (&lt;b&gt;ApiFunctionRole&lt;/b&gt; · &lt;b&gt;IngestFunctionRole&lt;/b&gt; · &lt;b&gt;AggregatorRole&lt;/b&gt;) · SigV4 Zero Static Keys · Resource-Level ARN Restrictions" vertex="1">
+          <mxGeometry height="28" width="1870" x="25" y="895" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>'''
+    return xml
+
+def export_png(xml_data, out_png_path):
+    print(f"Rendering {out_png_path} via headless Edge browser...")
+    from selenium import webdriver
+    from selenium.webdriver.edge.options import Options
+
+    config = {
+        "highlight": "#0000ff",
+        "nav": False,
+        "resize": False,
+        "toolbar": None,
+        "edit": None,
+        "xml": xml_data,
+        "check-visible-state": False
+    }
+
+    escaped_config = html.escape(json.dumps(config))
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://viewer.diagrams.net/js/viewer-static.min.js"></script>
+  <style>
+    body, html {{
+      margin: 0;
+      padding: 0;
+      background-color: #F8FAFC;
+      overflow: hidden;
+    }}
+    .mxgraph {{
+      max-width: 100%;
+      height: 100%;
+    }}
+  </style>
+</head>
+<body>
+  <div class="mxgraph" style="max-width:100%;border:none;" data-mxgraph="{escaped_config}"></div>
+</body>
+</html>
+"""
+
+    temp_html = os.path.abspath("temp_render.html")
+    with open(temp_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=2400,1350")
+    options.add_argument("--force-device-scale-factor=2")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--hide-scrollbars")
+
+    driver = webdriver.Edge(options=options)
+    try:
+        driver.get(f"file:///{temp_html}")
+        time.sleep(1.0)
+        driver.execute_script("if (window.GraphViewer && window.GraphViewer.processElements) window.GraphViewer.processElements();")
+
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+
+        wait = WebDriverWait(driver, 15)
+        svg = wait.until(EC.presence_of_element_located((By.TAG_NAME, "svg")))
+        time.sleep(1.5)  # Wait for all icons and fonts inside SVG to settle
+
+        driver.execute_script("arguments[0].scrollIntoView();", svg)
+        time.sleep(0.5)
+
+        svg.screenshot(out_png_path)
+        print(f"Successfully rendered: {out_png_path}")
+    finally:
+        driver.quit()
+        if os.path.exists(temp_html):
+            os.remove(temp_html)
+
+def main():
+    xml = build_xml()
+    
+    # Target files to update
+    targets = [
+        "d:/Code/Thuc_Tap/agent_sys/docs/agentsys-architecture.drawio",
+        "d:/Code/Thuc_Tap/agent_sys/agentsys-architecture.drawio",
+        "d:/Code/Thuc_Tap/agent_sys/report/static/files/agentsys-architecture.drawio",
+        "d:/Code/Thuc_Tap/agentsys-architecture.drawio",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/static/files/agentsys-architecture.drawio",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/public/files/agentsys-architecture.drawio"
+    ]
+    
+    for t in targets:
+        os.makedirs(os.path.dirname(t), exist_ok=True)
+        with open(t, "w", encoding="utf-8") as f:
+            f.write(xml)
+        print(f"Updated: {t}")
+
+    # Render PNG
+    png_main = "d:/Code/Thuc_Tap/agent_sys/docs/agentsys-architecture.png"
+    export_png(xml, png_main)
+
+    # Sync PNG across report directories
+    import shutil
+    sync_pngs = [
+        "d:/Code/Thuc_Tap/agent_sys/report/static/images/2-Proposal/architecture.png",
+        "d:/Code/Thuc_Tap/agent_sys/report/static/images/5-Workshop/architecture.png",
+        "d:/Code/Thuc_Tap/agent_sys/report/static/images/workshop/architecture.png",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/public/images/2-Proposal/architecture.png",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/public/images/5-Workshop/architecture.png",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/static/images/2-Proposal/architecture.png",
+        "d:/Code/Thuc_Tap/fcj-workshop-report/static/images/5-Workshop/architecture.png"
+    ]
+    for sp in sync_pngs:
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        shutil.copyfile(png_main, sp)
+        print(f"Copied to {sp}")
+
+if __name__ == "__main__":
+    main()

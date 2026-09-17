@@ -34,7 +34,7 @@ Build and deploy **AgentSys** following an **Event-Driven Serverless** architect
 
 ## 3. System Architecture Diagram
 
-![AgentSys AWS Architecture](/images/5-Workshop/architecture.svg)
+![AgentSys AWS Architecture](/images/5-Workshop/architecture.png)
 
 > 📥 **Download Architecture Diagram (Draw.io XML):** [agentsys-architecture.drawio](/files/agentsys-architecture.drawio)
 

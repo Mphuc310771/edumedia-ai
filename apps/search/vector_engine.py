@@ -106,21 +106,36 @@ def get_titan_embedding_with_source(text: str, bedrock_client=None) -> Tuple[Lis
     if time.time() < _TITAN_SKIP_UNTIL:
         return [], "off"
     try:
-        body = json.dumps({"inputText": text[:4000]})
-        response = bedrock_client.invoke_model(
-            body=body,
-            modelId="amazon.titan-embed-text-v1",
-            accept="application/json",
-            contentType="application/json",
-        )
-        response_body = json.loads(response.get("body").read())
-        raw_embedding = response_body.get("embedding", [])
+        raw_embedding = []
+        # Ưu tiên dùng Amazon Titan Embeddings v2 với native 256 dimensions và L2 normalization
+        try:
+            body_v2 = json.dumps({"inputText": text[:4000], "dimensions": EMBEDDING_DIM, "normalize": True})
+            response = bedrock_client.invoke_model(
+                body=body_v2,
+                modelId="amazon.titan-embed-text-v2:0",
+                accept="application/json",
+                contentType="application/json",
+            )
+            response_body = json.loads(response.get("body").read())
+            raw_embedding = response_body.get("embedding", [])
+        except Exception as v2_err:
+            # Fallback về Titan v1 nếu tài khoản chưa bật v2
+            logger.debug("Titan v2 unavailable (%s), falling back to Titan v1", v2_err)
+            body_v1 = json.dumps({"inputText": text[:4000]})
+            response = bedrock_client.invoke_model(
+                body=body_v1,
+                modelId="amazon.titan-embed-text-v1",
+                accept="application/json",
+                contentType="application/json",
+            )
+            response_body = json.loads(response.get("body").read())
+            raw_embedding = response_body.get("embedding", [])
+
         if not raw_embedding:
             return [], "off"
         if len(raw_embedding) == EMBEDDING_DIM:
             return raw_embedding, "titan"
-        # Subsample vector from 1536 to 256 dimensions to reduce DynamoDB storage costs
-        # and document payload size while retaining directional similarity after normalization.
+        # Subsample vector từ 1536 xuống 256 chiều nếu rơi vào fallback Titan v1
         step = len(raw_embedding) / EMBEDDING_DIM
         projected = [raw_embedding[int(i * step)] for i in range(EMBEDDING_DIM)]
         norm = math.sqrt(sum(x * x for x in projected))

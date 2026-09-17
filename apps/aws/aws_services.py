@@ -7,7 +7,7 @@ import re
 import time
 import urllib.request
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import quote
 
 import boto3
@@ -191,11 +191,63 @@ class DynamoCatalog:
             logger.warning("Could not validate MediaRecord for file_id=%s: %s", file_id, exc)
             return None
 
-    def list_all(self) -> List[MediaRecord]:
+    def list_all(self, limit: Optional[int] = 100) -> List[MediaRecord]:
+        """Fetch media records from DynamoDB with a hard limit and chunk filtering.
+
+        - Uses DynamoDB FilterExpression to discard auxiliary #CHUNK# and parent_file_id
+          items server-side before transferring over the wire to Lambda RAM.
+        - Caps pagination to prevent unbounded Full Table Scans when limit is specified
+          (defaults to 100 candidate items).
+        - Sorts candidate pool by created_at descending (newest first).
+        """
+        from boto3.dynamodb.conditions import Attr
+
         items: List[MediaRecord] = []
-        scan_kwargs = {}
+        filter_expr = Attr("parent_file_id").not_exists() & (~Attr("file_id").contains("#CHUNK#"))
+        scan_kwargs: dict[str, Any] = {"FilterExpression": filter_expr}
+        target_pool = max(limit, 100) if limit is not None else None
+        if target_pool is not None:
+            scan_kwargs["Limit"] = target_pool
+
         while True:
             response = self.table.scan(**scan_kwargs)
+            for row in response.get("Items", []):
+                file_id = str(row.get("file_id", ""))
+                # Defense-in-depth: skip chunks & parents in case of mock environments
+                if "#CHUNK#" in file_id or "parent_file_id" in row:
+                    continue
+                try:
+                    items.append(MediaRecord.model_validate(row))
+                except Exception:
+                    continue
+                if target_pool is not None and len(items) >= target_pool:
+                    break
+
+            if target_pool is not None and len(items) >= target_pool:
+                break
+            if "LastEvaluatedKey" not in response:
+                break
+            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+        items.sort(key=lambda r: r.created_at or "", reverse=True)
+        return items[:limit] if limit is not None else items
+
+    def _query_by_category(self, category: str, limit: Optional[int] = 100) -> List[MediaRecord]:
+        from boto3.dynamodb.conditions import Attr, Key
+
+        items: List[MediaRecord] = []
+        filter_expr = Attr("parent_file_id").not_exists() & (~Attr("file_id").contains("#CHUNK#"))
+        kwargs: dict[str, Any] = {
+            "IndexName": "category-index",
+            "KeyConditionExpression": Key("category").eq(category),
+            "FilterExpression": filter_expr,
+        }
+        target_pool = max(limit, 100) if limit is not None else None
+        if target_pool is not None:
+            kwargs["Limit"] = target_pool
+
+        while True:
+            response = self.table.query(**kwargs)
             for row in response.get("Items", []):
                 file_id = str(row.get("file_id", ""))
                 if "#CHUNK#" in file_id or "parent_file_id" in row:
@@ -204,29 +256,24 @@ class DynamoCatalog:
                     items.append(MediaRecord.model_validate(row))
                 except Exception:
                     continue
-            if "LastEvaluatedKey" not in response:
+                if target_pool is not None and len(items) >= target_pool:
+                    break
+
+            if target_pool is not None and len(items) >= target_pool:
                 break
-            scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-        return items
-
-    def _query_by_category(self, category: str) -> List[MediaRecord]:
-        from boto3.dynamodb.conditions import Key
-
-        items: List[MediaRecord] = []
-        kwargs = {
-            "IndexName": "category-index",
-            "KeyConditionExpression": Key("category").eq(category),
-        }
-        while True:
-            response = self.table.query(**kwargs)
-            items.extend(MediaRecord.model_validate(row) for row in response.get("Items", []))
             if "LastEvaluatedKey" not in response:
                 break
             kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-        return items
 
-    def search(self, plan: SearchPlan) -> List[MediaRecord]:
-        records = self._query_by_category(plan.category) if plan.category else self.list_all()
+        items.sort(key=lambda r: r.created_at or "", reverse=True)
+        return items[:limit] if limit is not None else items
+
+    def search(self, plan: SearchPlan, limit: Optional[int] = 100) -> List[MediaRecord]:
+        records = (
+            self._query_by_category(plan.category, limit=limit)
+            if plan.category
+            else self.list_all(limit=limit)
+        )
         narrowed = SearchPlan(
             keywords=plan.keywords,
             media_type=plan.media_type,
@@ -241,7 +288,7 @@ class DynamoCatalog:
         return True
 
     def clear(self) -> None:
-        items = self.list_all()
+        items = self.list_all(limit=None)
         with self.table.batch_writer() as batch:
             for item in items:
                 batch.delete_item(Key={"file_id": item.file_id})
@@ -370,6 +417,15 @@ class TranscribeSpeech:
             logger.warning("Transcribe start_job error: %s", exc)
             return None
 
+    def read_job_payload(self, job_name: str) -> dict:
+        job = self.client.get_transcription_job(TranscriptionJobName=job_name)
+        status = job["TranscriptionJob"]["TranscriptionJobStatus"]
+        if status != "COMPLETED":
+            return {}
+        uri = job["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
+        output_key = f"{settings.TRANSCRIBE_OUTPUT_PREFIX}{job_name}.json"
+        return _read_transcript_payload(uri, output_key)
+
     def read_job_transcript(self, job_name: str) -> str:
         job = self.client.get_transcription_job(TranscriptionJobName=job_name)
         status = job["TranscriptionJob"]["TranscriptionJobStatus"]
@@ -405,12 +461,12 @@ class TranscribeSpeech:
 
 
 class TitanEmbeddings:
-    """Amazon Titan Multimodal Embeddings (amazon.titan-embed-text-v1)."""
+    """Amazon Titan Text Embeddings (amazon.titan-embed-text-v2:0 with fallback to v1)."""
 
     def __init__(self):
         region = settings.BEDROCK_REGION or settings.AWS_REGION
         self.client = _client("bedrock-runtime", region=region)
-        self.model_id = "amazon.titan-embed-text-v1"
+        self.model_id = "amazon.titan-embed-text-v2:0"
 
     def embed_text(self, text: str) -> List[float]:
         from apps.search.vector_engine import get_titan_embedding
@@ -418,15 +474,12 @@ class TitanEmbeddings:
         return get_titan_embedding(text, bedrock_client=self.client)
 
 
-def _read_transcript(uri: str, output_key: str) -> str:
+def _read_transcript_payload(uri: str, output_key: str) -> dict:
     # 1. Try reading directly from S3 (customer bucket / private S3)
     if output_key and settings.MEDIA_BUCKET:
         try:
             body = _client("s3").get_object(Bucket=settings.MEDIA_BUCKET, Key=output_key)["Body"].read()
-            payload = json.loads(body.decode("utf-8"))
-            transcripts = payload.get("results", {}).get("transcripts", [])
-            if transcripts and transcripts[0].get("transcript"):
-                return transcripts[0].get("transcript", "").strip()
+            return json.loads(body.decode("utf-8"))
         except Exception as s3_exc:
             logger.debug("Could not read transcript directly from S3 (%s): %s", output_key, s3_exc)
 
@@ -434,13 +487,18 @@ def _read_transcript(uri: str, output_key: str) -> str:
     if uri and uri.startswith("https://"):
         try:
             with urllib.request.urlopen(uri, timeout=15) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-                transcripts = payload.get("results", {}).get("transcripts", [])
-                if transcripts and transcripts[0].get("transcript"):
-                    return transcripts[0].get("transcript", "").strip()
+                return json.loads(response.read().decode("utf-8"))
         except Exception as http_exc:
             logger.warning("Could not read transcript from URL (%s): %s", uri, http_exc)
 
+    return {}
+
+
+def _read_transcript(uri: str, output_key: str) -> str:
+    payload = _read_transcript_payload(uri, output_key)
+    transcripts = payload.get("results", {}).get("transcripts", [])
+    if transcripts and transcripts[0].get("transcript"):
+        return transcripts[0].get("transcript", "").strip()
     return ""
 
 
@@ -641,6 +699,48 @@ class CloudWatchMetrics:
             )
         except (BotoCoreError, ClientError) as exc:
             logger.warning("CloudWatch metric dropped: %s", exc)
+
+
+class SQSQueue:
+    """Helper client for dispatching messages to Amazon SQS."""
+
+    def __init__(self, queue_url: Optional[str] = None):
+        self.client = _client("sqs")
+        self.queue_url = (
+            queue_url
+            or os.environ.get("INGEST_QUEUE_URL")
+            or getattr(settings, "INGEST_QUEUE_URL", None)
+        )
+        self._resolved_url: Optional[str] = None
+
+    def get_queue_url(self) -> str:
+        if self.queue_url:
+            return self.queue_url
+        if self._resolved_url:
+            return self._resolved_url
+        try:
+            resp = self.client.get_queue_url(QueueName="agentsys-ingest-queue")
+            self._resolved_url = resp.get("QueueUrl", "")
+            return self._resolved_url
+        except Exception as exc:
+            logger.debug("Could not resolve queue URL for agentsys-ingest-queue: %s", exc)
+            return ""
+
+    def send_message(self, message_body: dict) -> bool:
+        url = self.get_queue_url()
+        if not url:
+            logger.warning("SQS queue URL not available, cannot send message")
+            return False
+        try:
+            self.client.send_message(
+                QueueUrl=url,
+                MessageBody=json.dumps(message_body),
+            )
+            logger.info("Successfully queued message to SQS queue %s", url)
+            return True
+        except Exception as exc:
+            logger.error("Failed to send message to SQS queue %s: %s", url, exc)
+            return False
 
 
 _PING_CACHE: dict = {"at": 0.0, "payload": None}

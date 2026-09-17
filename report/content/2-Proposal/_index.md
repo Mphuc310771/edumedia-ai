@@ -54,7 +54,7 @@ In academic and professional environments, students and researchers accumulate t
 
 The architecture conforms to official **AWS Cloud-Native Best Practices**:
 
-![AgentSys AWS Architecture](/images/5-Workshop/architecture.svg)
+![AgentSys AWS Architecture](/images/5-Workshop/architecture.png)
 
 > 📥 **Download Architecture Diagram (Draw.io XML):** [agentsys-architecture.drawio](/files/agentsys-architecture.drawio)
 

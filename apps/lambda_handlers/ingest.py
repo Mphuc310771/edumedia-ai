@@ -3,7 +3,7 @@ import logging
 from typing import Any, List, Tuple
 from urllib.parse import unquote_plus
 
-from apps.aws.providers import reset_runtime
+from apps.aws.providers import get_runtime, reset_runtime
 from apps.workers.ingestion import apply_transcribe_job, ingest_object
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,37 @@ def handler(event, context):
     for record in event.get("Records") or []:
         message_id = record.get("messageId") or ""
         try:
+            # 2a. Check for direct SQS action message (from /process or /reprocess)
+            body = record.get("body")
+            parsed_body = None
+            if body:
+                try:
+                    parsed_body = json.loads(body) if isinstance(body, str) else body
+                except Exception:
+                    parsed_body = None
+
+            if isinstance(parsed_body, dict) and parsed_body.get("action") in {"process", "reprocess"}:
+                file_id = parsed_body.get("file_id")
+                key = parsed_body.get("object_key")
+                filename = parsed_body.get("filename") or (key.rsplit("/", 1)[-1] if key else "")
+                content_type = parsed_body.get("content_type", "")
+                if file_id and key:
+                    action = parsed_body.get("action")
+                    if action != "reprocess":
+                        try:
+                            existing = get_runtime().catalog.get(file_id)
+                            if existing and getattr(existing, "status", "") == "READY":
+                                logger.info("skip_duplicate_direct_action file_id=%s already READY", file_id)
+                                processed.append({"file_id": getattr(existing, "file_id", file_id), "status": existing.status})
+                                continue
+                        except Exception:
+                            pass
+                    logger.info("sqs_direct_action action=%s file_id=%s key=%s", action, file_id, key)
+                    item = ingest_object(file_id=file_id, object_key=key, filename=filename, content_type=content_type)
+                    processed.append({"file_id": item.file_id, "status": item.status})
+                    continue
+
+            # 2b. Handle SQS-wrapped S3 ObjectCreated events
             objects = iter_s3_objects({"Records": [record]})
             for bucket, key in objects:
                 if not key.startswith("uploads/"):
@@ -68,6 +99,14 @@ def handler(event, context):
                     continue
                 filename = key.rsplit("/", 1)[-1]
                 file_id = filename.rsplit(".", 1)[0]
+                try:
+                    existing = get_runtime().catalog.get(file_id)
+                    if existing and getattr(existing, "status", "") == "READY":
+                        logger.info("skip_duplicate_s3_ingest file_id=%s already READY", file_id)
+                        processed.append({"file_id": getattr(existing, "file_id", file_id), "status": existing.status})
+                        continue
+                except Exception:
+                    pass
                 logger.info("s3_ingest bucket=%s key=%s", bucket, key)
                 item = ingest_object(file_id=file_id, object_key=key, filename=filename)
                 processed.append({"file_id": item.file_id, "status": item.status})

@@ -34,7 +34,7 @@ Xây dựng hệ thống **AgentSys** xử lý tự động theo mô hình **Eve
 
 ## 3. Sơ đồ Kiến trúc Hệ thống (System Architecture)
 
-![Kiến trúc AgentSys AWS](/images/5-Workshop/architecture.svg)
+![Kiến trúc AgentSys AWS](/images/5-Workshop/architecture.png)
 
 > 📥 **Tải file thiết kế kiến trúc gốc (Draw.io XML):** [agentsys-architecture.drawio](/files/agentsys-architecture.drawio) (có thể mở và chỉnh sửa trực tiếp trên [app.diagrams.net](https://app.diagrams.net)).
 

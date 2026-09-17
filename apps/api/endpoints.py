@@ -7,13 +7,15 @@ import os
 import re
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from botocore.exceptions import ClientError
 
 from apps.agent.search import execute_search
 from apps.api.auth import verify_api_key
 from apps.api.rate_limit import limiter
+from apps.aws import aws_services
+from apps.aws.aws_services import SQSQueue
 from apps.api.schemas import (
     AgentQueryRequest,
     AgentQueryResponse,
@@ -141,8 +143,12 @@ def _run_ingest_background(file_id: str, object_key: str, filename: str | None, 
 
 
 @router.post("/process", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
-def trigger_media_processing(payload: ProcessRequest, background_tasks: BackgroundTasks):
-    """Nhận yêu cầu xử lý và trả về ngay; phân tích chạy nền, client theo dõi qua /status."""
+def trigger_media_processing(payload: ProcessRequest):
+    """Yêu cầu xử lý phương tiện thủ công (manual trigger / fallback).
+
+    Lưu ý: Trong luồng tải lên chuẩn từ Web, S3 ObjectCreated notification đã tự động
+    đẩy sự kiện vào SQS IngestQueue. Endpoint này chỉ dùng cho fallback hoặc kiểm thử độc lập.
+    """
     object_key = payload.object_key or f"uploads/{payload.file_id}"
     name = payload.filename or os.path.basename(object_key)
     runtime = get_runtime()
@@ -156,13 +162,27 @@ def trigger_media_processing(payload: ProcessRequest, background_tasks: Backgrou
         source="pipeline",
     )
     runtime.catalog.put(stub)
-    # NOTE: BackgroundTasks runs asynchronously in local/container environments.
-    # In AWS Lambda, execution freezes immediately after the HTTP response is returned,
-    # meaning BackgroundTasks may not complete reliably. For production AWS environments,
-    # consider queueing ingestion jobs via Amazon SQS with a dedicated worker Lambda.
-    background_tasks.add_task(
-        _run_ingest_background, payload.file_id, object_key, payload.filename, payload.content_type
-    )
+
+    # Đẩy message trực tiếp vào SQS Ingest Queue (tránh lỗi CPU Freeze của FastAPI BackgroundTasks trên Lambda)
+    message = {
+        "action": "process",
+        "file_id": payload.file_id,
+        "object_key": object_key,
+        "filename": name,
+        "content_type": payload.content_type or "",
+    }
+    enqueued = False
+    try:
+        queue = aws_services.SQSQueue()
+        enqueued = queue.send_message(message)
+    except Exception as exc:
+        logger.warning("SQS enqueue failed for file_id=%s: %s", payload.file_id, exc)
+
+    # Chế độ chạy local standalone khi không có SQS
+    if not enqueued and not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        logger.info("Running local direct ingest fallback for file_id=%s", payload.file_id)
+        _run_ingest_background(payload.file_id, object_key, payload.filename, payload.content_type)
+
     return {
         "message": "Media indexing started",
         "file_id": payload.file_id,
@@ -172,8 +192,8 @@ def trigger_media_processing(payload: ProcessRequest, background_tasks: Backgrou
 
 
 @router.post("/reprocess/{file_id}", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
-def reprocess_item(file_id: str, background_tasks: BackgroundTasks):
-    """Phân tích lại một tệp đã FAILED (hoặc muốn chạy lại) từ chính object S3 đã lưu."""
+def reprocess_item(file_id: str):
+    """Phân tích lại một tệp đã FAILED từ S3 object đã lưu qua SQS queue."""
     runtime = get_runtime()
     record = runtime.catalog.get(file_id)
     if record is None:
@@ -183,11 +203,27 @@ def reprocess_item(file_id: str, background_tasks: BackgroundTasks):
     record.status = "INDEXING"
     record.error = None
     runtime.catalog.put(record)
-    # NOTE: BackgroundTasks execution may not complete in AWS Lambda because the runtime
-    # freezes after sending the response. Suggest using Amazon SQS for production workloads.
-    background_tasks.add_task(
-        _run_ingest_background, record.file_id, record.s3_key, record.filename, record.content_type
-    )
+
+    # Đẩy message trực tiếp vào SQS Ingest Queue
+    message = {
+        "action": "reprocess",
+        "file_id": record.file_id,
+        "object_key": record.s3_key,
+        "filename": record.filename,
+        "content_type": record.content_type,
+    }
+    enqueued = False
+    try:
+        queue = aws_services.SQSQueue()
+        enqueued = queue.send_message(message)
+    except Exception as exc:
+        logger.warning("SQS enqueue failed for reprocess file_id=%s: %s", record.file_id, exc)
+
+    # Chế độ chạy local standalone khi không có SQS
+    if not enqueued and not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        logger.info("Running local direct reprocess fallback for file_id=%s", record.file_id)
+        _run_ingest_background(record.file_id, record.s3_key, record.filename, record.content_type)
+
     return {"file_id": record.file_id, "status": "INDEXING", "error": None}
 
 
@@ -198,10 +234,21 @@ def make_file_id(filename: str, body: bytes) -> str:
     return f"{safe_slug}-{content_hash}"
 
 
+# Giới hạn 6MB cho upload trực tiếp đồng bộ nhằm tránh lỗi 413 của API Gateway (tối đa 10MB)
+# và chống timeout/CPU Freeze trên AWS Lambda. Khuyến nghị dùng /upload-url cho tệp lớn.
+MAX_DIRECT_UPLOAD_BYTES = 6 * 1024 * 1024
+
+
 @router.post("/upload", response_model=MediaItemOut, dependencies=[Depends(verify_api_key)])
 async def upload_and_ingest(file: UploadFile = File(...)):
     runtime = get_runtime()
     body = await file.read()
+    if len(body) > MAX_DIRECT_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Tệp vượt quá giới hạn 6MB cho upload trực tiếp. Vui lòng sử dụng /upload-url để tải lên S3 qua Presigned URL.",
+        )
+    logger.warning("direct_sync_upload_used filename=%s size=%d. Khuyến nghị dùng /upload-url cho môi trường production.", file.filename, len(body))
     file_id = make_file_id(file.filename or "upload.bin", body)
     ext = os.path.splitext(file.filename or "upload.bin")[1]
     # Use 'direct/' prefix to avoid triggering S3→SQS→Lambda duplicate ingestion.
@@ -225,6 +272,12 @@ async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
     results = []
     for file in files:
         body = await file.read()
+        if len(body) > MAX_DIRECT_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Tệp {file.filename} vượt quá giới hạn 6MB. Vui lòng sử dụng /upload-url.",
+            )
+        logger.warning("direct_sync_upload_used filename=%s size=%d", file.filename, len(body))
         file_id = make_file_id(file.filename or "upload.bin", body)
         ext = os.path.splitext(file.filename or "upload.bin")[1]
         object_key = f"direct/{file_id}{ext}"
@@ -302,7 +355,7 @@ def process_agent_query(request: Request, payload: AgentQueryRequest):
 @router.delete("/clear", dependencies=[Depends(verify_api_key)])
 def clear_all_items():
     runtime = get_runtime()
-    for record in runtime.catalog.list_all():
+    for record in runtime.catalog.list_all(limit=None):
         _purge_objects(record)
     runtime.catalog.clear()
     return {"message": "All media items cleared successfully"}

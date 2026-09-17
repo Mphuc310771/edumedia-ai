@@ -28,6 +28,7 @@ Sau khi hoàn thành workshop, bạn sẽ sở hữu một hệ thống hoàn ch
 4. **[5.4. Triển khai Lambda Ingestion Engine với Amazon Rekognition & Transcribe vi-VN](5.4-AI-Pipeline/)**
 5. **[5.5. Xây dựng Trợ lý Tìm kiếm với Amazon Bedrock & DynamoDB GSI Catalog](5.5-Bedrock-Search/)**
 6. **[5.6. Thiết lập CloudWatch Monitoring, Alarms và Quy trình Dọn dẹp Tài nguyên (Cleanup)](5.6-Monitoring-Cleanup/)**
+7. **[5.7. Thảo luận: Kiến trúc Đánh đổi & Lộ trình Nâng cấp Enterprise](5.7-Architecture-Tradeoffs/)**
 
 ---
 

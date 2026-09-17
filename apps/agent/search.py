@@ -8,6 +8,31 @@ from apps.domain import SearchHit, SearchPlan
 from apps.search.vector_engine import hybrid_search
 
 
+CANDIDATE_POOL_LIMIT: int = 100
+
+
+def _fetch_candidate_pool(catalog, category: str | None = None, limit: int = CANDIDATE_POOL_LIMIT) -> List:
+    """Fetch candidate records respecting the hard limit and avoiding unbounded scans."""
+    records = None
+    if category and hasattr(catalog, "_query_by_category"):
+        try:
+            records = catalog._query_by_category(category, limit=limit)
+        except TypeError:
+            records = catalog._query_by_category(category)
+        except Exception:
+            records = None
+
+    if records is None:
+        try:
+            records = catalog.list_all(limit=limit)
+        except TypeError:
+            records = catalog.list_all()
+
+    if records and len(records) > limit:
+        records = records[:limit]
+    return records or []
+
+
 def execute_search(user_query: str) -> tuple[SearchPlan, List[SearchHit]]:
     """Execute a two-phase search for media records matching a natural language query.
 
@@ -16,6 +41,9 @@ def execute_search(user_query: str) -> tuple[SearchPlan, List[SearchHit]]:
     Phase 2 (Broadened): If strict filtering produces zero results, relaxes the
     metadata filters (media_type, category, subject) to search across the entire catalog
     with higher vector embedding weight.
+
+    Candidate Pool: Limited to a hard cap of 100 newest items to prevent unbounded
+    DynamoDB Full Table Scans and control Lambda RAM consumption.
 
     Args:
         user_query: Natural language query string from the user.
@@ -32,17 +60,10 @@ def execute_search(user_query: str) -> tuple[SearchPlan, List[SearchHit]]:
 
     bedrock_client = getattr(runtime.planner, "client", None)
 
-    # Smart GSI Query: If planner identified a specific category, fetch records
-    # via DynamoDB category-index GSI first to avoid full-table scans.
-    candidate_records = None
-    if plan.category and hasattr(runtime.catalog, "_query_by_category"):
-        try:
-            candidate_records = runtime.catalog._query_by_category(plan.category)
-        except Exception:
-            candidate_records = None
-
-    if candidate_records is None:
-        candidate_records = runtime.catalog.list_all()
+    # Smart GSI Query / Capped Candidate Pool:
+    # Query via DynamoDB category-index GSI first if available, otherwise fetch
+    # up to CANDIDATE_POOL_LIMIT (100) newest items to calculate Cosine Similarity.
+    candidate_records = _fetch_candidate_pool(runtime.catalog, plan.category, limit=CANDIDATE_POOL_LIMIT)
 
     hits, embedding_source = hybrid_search(
         records=candidate_records,
@@ -56,8 +77,9 @@ def execute_search(user_query: str) -> tuple[SearchPlan, List[SearchHit]]:
     # Phase 2 Broadening: When strict metadata constraints (media_type, category, subject)
     # yield zero hits, broaden the search scope by removing these filters while keeping
     # keywords, and increase vector similarity weight (0.6 -> 0.7) to maximize semantic recall.
+    # The broadened candidate pool is also capped at CANDIDATE_POOL_LIMIT (100).
     if not hits and (plan.media_type or plan.category or plan.subject):
-        all_records = runtime.catalog.list_all()
+        all_records = _fetch_candidate_pool(runtime.catalog, category=None, limit=CANDIDATE_POOL_LIMIT)
         broadened_plan = SearchPlan(
             keywords=plan.keywords,
             media_type=None,

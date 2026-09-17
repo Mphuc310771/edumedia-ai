@@ -54,7 +54,7 @@ Trong môi trường học tập và làm việc hiện đại, sinh viên và n
 
 Sơ đồ kiến trúc AgentSys tuân thủ tiêu chuẩn thiết kế **AWS Cloud-Native**:
 
-![Kiến trúc AgentSys AWS](/images/5-Workshop/architecture.svg)
+![Kiến trúc AgentSys AWS](/images/5-Workshop/architecture.png)
 
 > 📥 **Tải file thiết kế kiến trúc chuẩn AWS (Draw.io XML):** [agentsys-architecture.drawio](/files/agentsys-architecture.drawio)
 

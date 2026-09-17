@@ -307,3 +307,61 @@ def test_dynamo_delete(moto_aws_runtime):
     cat = DynamoCatalog()
     cat.delete("test")
 
+
+def test_dynamo_catalog_list_all_hard_limit_and_chunk_filter(moto_aws_runtime):
+    """Test that list_all respects hard limits, filters out chunks via FilterExpression, and sorts by created_at."""
+    catalog = DynamoCatalog()
+    catalog.clear()
+    r1 = MediaRecord(
+        file_id="rec-old",
+        filename="old.jpg",
+        s3_key="uploads/old.jpg",
+        content_type="image/jpeg",
+        media_type="image",
+        category="study",
+        created_at="2026-01-01T10:00:00Z",
+    )
+    r2 = MediaRecord(
+        file_id="rec-mid",
+        filename="mid.jpg",
+        s3_key="uploads/mid.jpg",
+        content_type="image/jpeg",
+        media_type="image",
+        category="study",
+        created_at="2026-06-01T10:00:00Z",
+    )
+    r3 = MediaRecord(
+        file_id="rec-new",
+        filename="new.jpg",
+        s3_key="uploads/new.jpg",
+        content_type="image/jpeg",
+        media_type="image",
+        category="study",
+        created_at="2026-09-01T10:00:00Z",
+    )
+    catalog.put(r1)
+    catalog.put(r2)
+    catalog.put(r3)
+
+    # Insert chunk items directly into table
+    catalog.table.put_item(Item={"file_id": "rec-new#CHUNK#0001", "parent_file_id": "rec-new", "text": "chunk1"})
+    catalog.table.put_item(Item={"file_id": "rec-new#CHUNK#0002", "parent_file_id": "rec-new", "text": "chunk2"})
+
+    # 1. list_all with limit=2 returns the 2 newest records and excludes chunks
+    items = catalog.list_all(limit=2)
+    assert len(items) == 2
+    assert items[0].file_id == "rec-new"
+    assert items[1].file_id == "rec-mid"
+    assert not any("#CHUNK#" in i.file_id for i in items)
+
+    # 2. _query_by_category with limit=1 returns 1 newest record in category
+    cat_items = catalog._query_by_category("study", limit=1)
+    assert len(cat_items) == 1
+    assert cat_items[0].file_id == "rec-new"
+
+    # 3. list_all(limit=None) returns all 3 media records without chunks
+    all_items = catalog.list_all(limit=None)
+    assert len(all_items) == 3
+    assert not any("#CHUNK#" in i.file_id for i in all_items)
+
+

@@ -203,3 +203,76 @@ def test_global_exception_handler(monkeypatch):
     body = resp.json()
     assert body["error"] is True
     assert body["request_id"]
+
+
+def test_process_endpoint_enqueues_sqs(client, auth_headers, monkeypatch):
+    """Test that /process sends an SQS message instead of BackgroundTasks."""
+    enqueued_messages = []
+    monkeypatch.setattr(
+        "apps.aws.aws_services.SQSQueue.send_message",
+        lambda self, msg: enqueued_messages.append(msg) or True,
+    )
+    resp = client.post(
+        "/api/v1/media/process",
+        json={"file_id": "proc-sqs-test", "content_type": "image/jpeg", "filename": "proc.jpg"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 202
+    assert len(enqueued_messages) == 1
+    assert enqueued_messages[0]["action"] == "process"
+    assert enqueued_messages[0]["file_id"] == "proc-sqs-test"
+    assert enqueued_messages[0]["object_key"] == "uploads/proc-sqs-test"
+
+
+def test_reprocess_endpoint_enqueues_sqs(client, auth_headers, monkeypatch):
+    """Test that /reprocess sends an SQS message instead of BackgroundTasks."""
+    from apps.domain import MediaRecord
+    from apps.aws.providers import get_runtime
+
+    runtime = get_runtime()
+    record = MediaRecord(
+        file_id="reproc-sqs-test",
+        filename="reproc.jpg",
+        s3_key="uploads/reproc.jpg",
+        media_type="image",
+        content_type="image/jpeg",
+        status="FAILED",
+    )
+    runtime.catalog.put(record)
+
+    enqueued_messages = []
+    monkeypatch.setattr(
+        "apps.aws.aws_services.SQSQueue.send_message",
+        lambda self, msg: enqueued_messages.append(msg) or True,
+    )
+
+    resp = client.post("/api/v1/media/reprocess/reproc-sqs-test", headers=auth_headers)
+    assert resp.status_code == 202
+    assert len(enqueued_messages) == 1
+    assert enqueued_messages[0]["action"] == "reprocess"
+    assert enqueued_messages[0]["file_id"] == "reproc-sqs-test"
+
+
+def test_ingest_handler_direct_sqs_action():
+    """Test that IngestHandler consumes direct SQS action messages."""
+    import json
+    from apps.lambda_handlers.ingest import handler
+
+    event = {
+        "Records": [
+            {
+                "messageId": "msg-sqs-direct",
+                "body": json.dumps({
+                    "action": "process",
+                    "file_id": "direct-sqs-item",
+                    "object_key": "uploads/direct-sqs-item.jpg",
+                    "filename": "direct-sqs-item.jpg",
+                    "content_type": "image/jpeg",
+                }),
+            }
+        ]
+    }
+    res = handler(event, None)
+    assert res["ok"] is True
+    assert len(res["processed"]) == 1
+    assert res["processed"][0]["file_id"] == "direct-sqs-item"

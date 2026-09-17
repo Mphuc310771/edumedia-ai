@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react"
-import { fetchStatus, reprocessMedia, requestUploadUrl, putPresigned, triggerProcess } from "../api/client"
+import { fetchStatus, reprocessMedia, requestUploadUrl, putPresigned } from "../api/client"
 
 export type UploadTaskStatus = "queued" | "uploading" | "processing" | "done" | "failed"
 
@@ -88,13 +88,9 @@ export function useUploadQueue(onCatalogChanged: () => void, onBatchDone: (ok: n
           await putPresigned(presigned_url, file)
 
           patchTask(taskId, { status: "processing", fileId: file_id })
-          await triggerProcess({
-            file_id,
-            object_key,
-            filename: file.name,
-            content_type: file.type || "application/octet-stream",
-          })
-          // Card hiện ngay trong thư viện với trạng thái INDEXING
+          // S3 ObjectCreated event notification tự động đưa message vào SQS IngestQueue.
+          // Không gọi triggerProcess để tránh Double Ingestion (nhận 2 messages cho cùng 1 file).
+          // Card hiện ngay trong thư viện với trạng thái INDEXING/READY khi poll
           onCatalogChanged()
           void pollUntilSettled(taskId, file_id)
         } catch (err: unknown) {

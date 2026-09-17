@@ -54,6 +54,7 @@ class MediaRecord(BaseModel):
     analysis_source: str = ""
     subject: str = "none"
     thumb_key: Optional[str] = None
+    pipeline_status: Optional[str] = None
 
     @field_validator("size_bytes", mode="before")
     @classmethod

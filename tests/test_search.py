@@ -347,4 +347,30 @@ def test_bedrock_planner_cache_hit():
     assert plan.subject == "math"
 
 
+def test_search_candidate_pool_limit_and_chunk_exclusion(monkeypatch):
+    from apps.agent.search import CANDIDATE_POOL_LIMIT, _fetch_candidate_pool
+    from apps.aws.providers import get_runtime
+    from apps.domain import MediaRecord
+
+    assert CANDIDATE_POOL_LIMIT == 100
+
+    # Test candidate pool capping
+    runtime = get_runtime()
+    # Insert a chunk item directly into runtime table
+    runtime.catalog.table.put_item(
+        Item={"file_id": "seed-aws-slide#CHUNK#0001", "parent_file_id": "seed-aws-slide", "text": "chunk"}
+    )
+
+    # Test _fetch_candidate_pool excludes chunks and caps at limit
+    pool = _fetch_candidate_pool(runtime.catalog, category="study", limit=2)
+    assert len(pool) <= 2
+    assert not any("#CHUNK#" in r.file_id for r in pool)
+
+    # Test search execution never returns chunks
+    _, hits = execute_search("Serverless S3 DynamoDB")
+    assert hits
+    assert not any("#CHUNK#" in hit.record.file_id for hit in hits)
+
+
+
 

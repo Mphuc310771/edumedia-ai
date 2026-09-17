@@ -28,6 +28,7 @@ Upon completing this workshop, you will operate an end-to-end cloud-native syste
 4. **[5.4. Deploying Lambda Ingestion Engine with Amazon Rekognition & Transcribe vi-VN](5.4-AI-Pipeline/)**
 5. **[5.5. Building Search Agent with Amazon Bedrock & DynamoDB GSI Catalog](5.5-Bedrock-Search/)**
 6. **[5.6. Setting up CloudWatch Monitoring, Alarms and Resource Cleanup Runbook](5.6-Monitoring-Cleanup/)**
+7. **[5.7. Discussion: Architecture Trade-offs & Enterprise Roadmap](5.7-Architecture-Tradeoffs/)**
 
 ---
 

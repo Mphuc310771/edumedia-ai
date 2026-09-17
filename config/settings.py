@@ -60,6 +60,10 @@ class Settings(BaseSettings):
         description="Override region for Bedrock if the stack region has no model access",
     )
     CLOUDWATCH_NAMESPACE: str = "AgentSys"
+    INGEST_QUEUE_URL: Optional[str] = Field(
+        default=None,
+        description="SQS queue URL for agentsys-ingest-queue",
+    )
 
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
