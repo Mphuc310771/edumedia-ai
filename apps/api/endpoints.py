@@ -63,13 +63,26 @@ def _presign(object_key: str) -> str:
 
 def _purge_objects(record: MediaRecord) -> None:
     store = get_runtime().store
-    for key in (record.s3_key, record.thumb_key):
+    raw_key = f"transcripts/raw/{record.file_id}.json" if getattr(record, "has_extended_transcript", False) else None
+    for key in (record.s3_key, record.thumb_key, raw_key):
         if not key:
             continue
         try:
             store.delete_object(key)
         except Exception as exc:
             logger.warning("s3 delete skipped key=%s: %s", key, exc)
+
+
+MAX_PUBLIC_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB public demo guardrail
+
+
+def is_demo_record(record: MediaRecord) -> bool:
+    if getattr(record, "is_demo_protected", False):
+        return True
+    lower_fn = (record.filename or "").lower()
+    lower_fid = (record.file_id or "").lower()
+    return lower_fn.startswith(("sample_", "sample-", "demo_", "demo-")) or \
+           lower_fid.startswith(("sample_", "sample-", "demo_", "demo-"))
 
 
 def to_item_out(
@@ -84,6 +97,7 @@ def to_item_out(
     original = _presign(record.s3_key) if include_original else thumb
     subject = record.subject or resolve_subject(record)
     category = record.category
+    demo_protected = is_demo_record(record)
     return MediaItemOut(
         id=record.file_id,
         filename=record.filename,
@@ -109,23 +123,41 @@ def to_item_out(
         analysisSource=record.analysis_source,
         subject=subject,
         subjectLabel=SUBJECT_LABELS.get(subject, ""),
+        transcript_s3_uri=record.transcript_s3_uri,
+        has_extended_transcript=record.has_extended_transcript,
+        transcriptS3Uri=record.transcript_s3_uri,
+        hasExtendedTranscript=record.has_extended_transcript,
+        is_demo_protected=demo_protected,
+        isDemoProtected=demo_protected,
     )
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse, dependencies=[Depends(verify_api_key)])
 def generate_upload_url(payload: UploadUrlRequest):
+    media_type = infer_media_type(payload.filename, payload.content_type)
+    if media_type == "other":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Định dạng tệp không được hỗ trợ. Vui lòng tải ảnh (JPEG, PNG, WebP), âm thanh (MP3, M4A, WAV, FLAC), hoặc video (MP4, MOV, WebM).",
+        )
+    if payload.size_bytes is not None and payload.size_bytes > MAX_PUBLIC_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Dung lượng tệp ({payload.size_bytes // (1024*1024)}MB) vượt quá giới hạn demo cho phép (tối đa 25MB).",
+        )
     file_id = str(uuid.uuid4())
     ext = os.path.splitext(payload.filename)[1]
     object_key = f"uploads/{file_id}{ext}"
     runtime = get_runtime()
     try:
-        url = runtime.store.presign_put(object_key, payload.content_type)
+        # Standardized 15-minute TTL (900 seconds) matching AWS Well-Architected Security Specification
+        url = runtime.store.presign_put(object_key, payload.content_type, expires=900)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create upload URL: {exc}",
         ) from exc
-    return UploadUrlResponse(file_id=file_id, presigned_url=url, object_key=object_key)
+    return UploadUrlResponse(file_id=file_id, presigned_url=url, upload_url=url, object_key=object_key)
 
 
 def _run_ingest_background(file_id: str, object_key: str, filename: str | None, content_type: str) -> None:
@@ -137,9 +169,8 @@ def _run_ingest_background(file_id: str, object_key: str, filename: str | None, 
             filename=filename,
             content_type=content_type,
         )
-    except Exception:
-        # ingest_object đã đánh dấu record FAILED và log; nuốt exception để không làm ồn background task
-        pass
+    except Exception as exc:
+        logger.warning("Non-blocking operation failed for file_id %s: %s", file_id, exc, exc_info=True)
 
 
 @router.post("/process", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
@@ -230,7 +261,7 @@ def reprocess_item(file_id: str):
 def make_file_id(filename: str, body: bytes) -> str:
     clean_name = os.path.basename(filename or "media.bin").strip()
     safe_slug = re.sub(r"[^0-9a-zA-Z._-]", "_", clean_name)[:30]
-    content_hash = hashlib.md5(f"{clean_name}_{len(body)}".encode("utf-8")).hexdigest()[:10]
+    content_hash = hashlib.md5(f"{clean_name}_{len(body)}".encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
     return f"{safe_slug}-{content_hash}"
 
 
@@ -239,8 +270,19 @@ def make_file_id(filename: str, body: bytes) -> str:
 MAX_DIRECT_UPLOAD_BYTES = 6 * 1024 * 1024
 
 
-@router.post("/upload", response_model=MediaItemOut, dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/upload",
+    response_model=MediaItemOut,
+    dependencies=[Depends(verify_api_key)],
+    deprecated=True,
+    summary="[DEPRECATED] Tải lên trực tiếp qua API Gateway",
+)
 async def upload_and_ingest(file: UploadFile = File(...)):
+    """[DEPRECATED - DEV/TEST ONLY] Tải lên và xử lý đồng bộ qua API Gateway.
+
+    LƯU Ý: Trong môi trường AWS Production, bắt buộc sử dụng Direct S3 Upload qua route /upload-url
+    để bypass giới hạn payload API Gateway và đảm bảo nguyên tắc Least-Privilege IAM cho Lambda API.
+    """
     runtime = get_runtime()
     body = await file.read()
     if len(body) > MAX_DIRECT_UPLOAD_BYTES:
@@ -248,7 +290,7 @@ async def upload_and_ingest(file: UploadFile = File(...)):
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Tệp vượt quá giới hạn 6MB cho upload trực tiếp. Vui lòng sử dụng /upload-url để tải lên S3 qua Presigned URL.",
         )
-    logger.warning("direct_sync_upload_used filename=%s size=%d. Khuyến nghị dùng /upload-url cho môi trường production.", file.filename, len(body))
+    logger.warning("deprecated_direct_sync_upload_used filename=%s size=%d. Dùng /upload-url cho production.", file.filename, len(body))
     file_id = make_file_id(file.filename or "upload.bin", body)
     ext = os.path.splitext(file.filename or "upload.bin")[1]
     # Use 'direct/' prefix to avoid triggering S3→SQS→Lambda duplicate ingestion.
@@ -266,8 +308,19 @@ async def upload_and_ingest(file: UploadFile = File(...)):
     return to_item_out(record, include_original=True)
 
 
-@router.post("/upload-batch", response_model=list[MediaItemOut], dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/upload-batch",
+    response_model=list[MediaItemOut],
+    dependencies=[Depends(verify_api_key)],
+    deprecated=True,
+    summary="[DEPRECATED] Tải lên nhiều tệp qua API Gateway",
+)
 async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
+    """[DEPRECATED - DEV/TEST ONLY] Tải lên nhiều tệp qua API Gateway.
+
+    LƯU Ý: Trong môi trường AWS Production, hãy sử dụng hàng đợi upload phía frontend
+    với Presigned URL (/upload-url) để tải song song trực tiếp lên S3.
+    """
     runtime = get_runtime()
     results = []
     for file in files:
@@ -277,7 +330,7 @@ async def upload_batch_and_ingest(files: list[UploadFile] = File(...)):
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"Tệp {file.filename} vượt quá giới hạn 6MB. Vui lòng sử dụng /upload-url.",
             )
-        logger.warning("direct_sync_upload_used filename=%s size=%d", file.filename, len(body))
+        logger.warning("deprecated_direct_sync_upload_used filename=%s size=%d", file.filename, len(body))
         file_id = make_file_id(file.filename or "upload.bin", body)
         ext = os.path.splitext(file.filename or "upload.bin")[1]
         object_key = f"direct/{file_id}{ext}"
@@ -313,7 +366,7 @@ def _list_records():
                 detail="Catalog DynamoDB chưa có. Cần sam deploy stack agentsys rồi sửa MEDIA_BUCKET trong .env.",
             ) from exc
         raise
-    records.sort(key=lambda item: item.created_at, reverse=True)
+    records.sort(key=lambda item: item.created_at or "", reverse=True)
     return records
 
 
@@ -327,11 +380,36 @@ def item_content_url(file_id: str):
     record = get_runtime().catalog.get(file_id)
     if record is None:
         raise HTTPException(status_code=404, detail="File ID not found")
+    raw_transcript_key = f"transcripts/raw/{file_id}.json" if getattr(record, "has_extended_transcript", False) else None
     return {
         "id": file_id,
         "url": _presign(record.s3_key),
         "thumbnailUrl": _presign(record.thumb_key or ""),
+        "transcriptUrl": _presign(raw_transcript_key) if raw_transcript_key else None,
+        "transcriptS3Uri": record.transcript_s3_uri,
+        "hasExtendedTranscript": getattr(record, "has_extended_transcript", False),
     }
+
+
+@router.get("/items/{file_id}/transcript-raw", dependencies=[Depends(verify_api_key)])
+def item_raw_transcript(file_id: str):
+    import json
+    from fastapi.responses import Response
+
+    runtime = get_runtime()
+    record = runtime.catalog.get(file_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="File ID not found")
+    raw_key = f"transcripts/raw/{file_id}.json"
+    raw_bytes = None
+    try:
+        raw_bytes = runtime.store.get_bytes(raw_key)
+    except Exception as exc:
+        logger.debug("Failed to retrieve raw transcript %s: %s", raw_key, exc)
+    if raw_bytes:
+        return Response(content=raw_bytes, media_type="application/json")
+    payload = json.dumps({"file_id": file_id, "transcript": record.transcript or ""}, ensure_ascii=False)
+    return Response(content=payload, media_type="application/json")
 
 
 @router.post("/agent/query", response_model=AgentQueryResponse, dependencies=[Depends(verify_api_key)])
@@ -353,20 +431,42 @@ def process_agent_query(request: Request, payload: AgentQueryRequest):
 
 
 @router.delete("/clear", dependencies=[Depends(verify_api_key)])
-def clear_all_items():
+def clear_all_items(request: Request):
     runtime = get_runtime()
-    for record in runtime.catalog.list_all(limit=None):
+    records = runtime.catalog.list_all(limit=None)
+    force_admin = request.headers.get("x-admin-force") == "true"
+    cleared_count = 0
+    protected_count = 0
+
+    for record in records:
+        if is_demo_record(record) and not force_admin:
+            protected_count += 1
+            continue
         _purge_objects(record)
-    runtime.catalog.clear()
-    return {"message": "All media items cleared successfully"}
+        runtime.catalog.delete(record.file_id)
+        cleared_count += 1
+
+    return {
+        "message": f"All media items cleared successfully (cleared {cleared_count}, protected {protected_count})",
+        "cleared_count": cleared_count,
+        "protected_count": protected_count,
+    }
 
 
 @router.delete("/{file_id}", dependencies=[Depends(verify_api_key)])
-def delete_item(file_id: str):
+def delete_item(file_id: str, request: Request):
     runtime = get_runtime()
     record = runtime.catalog.get(file_id)
     if record is None:
         raise HTTPException(status_code=404, detail="File ID not found")
+
+    force_admin = request.headers.get("x-admin-force") == "true"
+    if is_demo_record(record) and not force_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tệp mẫu được bảo vệ cho người dùng trải nghiệm demo (is_demo_protected: true). Không thể xóa.",
+        )
+
     _purge_objects(record)
     runtime.catalog.delete(file_id)
     return {"message": "Deleted successfully", "file_id": file_id}

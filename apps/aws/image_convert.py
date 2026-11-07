@@ -20,23 +20,27 @@ def image_bytes_to_jpeg(raw: bytes) -> bytes:
     except ImportError as exc:
         raise RuntimeError("Cần cài Pillow để chuyển WebP/GIF sang JPEG cho Rekognition.") from exc
 
-    image = Image.open(BytesIO(raw))
-    image.load()
-    if image.mode != "RGB":
-        image = image.convert("RGB")
+    with Image.open(BytesIO(raw)) as original:
+        original.load()
+        image = original.convert("RGB") if original.mode != "RGB" else original.copy()
 
-    width, height = image.size
-    longest = max(width, height)
-    if longest > MAX_EDGE:
-        scale = MAX_EDGE / float(longest)
-        image = image.resize((max(1, int(width * scale)), max(1, int(height * scale))))
+    try:
+        width, height = image.size
+        longest = max(width, height)
+        if longest > MAX_EDGE:
+            scale = MAX_EDGE / float(longest)
+            resized = image.resize((max(1, int(width * scale)), max(1, int(height * scale))))
+            image.close()
+            image = resized
 
-    quality = 90
-    jpeg = _save_jpeg(image, quality)
-    while len(jpeg) > MAX_JPEG_BYTES and quality > 50:
-        quality -= 10
+        quality = 90
         jpeg = _save_jpeg(image, quality)
-    return jpeg
+        while len(jpeg) > MAX_JPEG_BYTES and quality > 50:
+            quality -= 10
+            jpeg = _save_jpeg(image, quality)
+        return jpeg
+    finally:
+        image.close()
 
 
 def _save_jpeg(image, quality: int) -> bytes:
@@ -48,9 +52,12 @@ def _save_jpeg(image, quality: int) -> bytes:
 def make_thumbnail_jpeg(raw: bytes, max_edge: int = 480) -> bytes:
     from PIL import Image
 
-    image = Image.open(BytesIO(raw))
-    image.load()
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    image.thumbnail((max_edge, max_edge))
-    return _save_jpeg(image, 72)
+    with Image.open(BytesIO(raw)) as original:
+        original.load()
+        image = original.convert("RGB") if original.mode != "RGB" else original.copy()
+
+    try:
+        image.thumbnail((max_edge, max_edge))
+        return _save_jpeg(image, 72)
+    finally:
+        image.close()

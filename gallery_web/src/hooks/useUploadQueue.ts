@@ -8,12 +8,27 @@ export interface UploadTask {
   fileName: string
   fileId?: string
   status: UploadTaskStatus
+  progress?: number
   error?: string
 }
 
 const CONCURRENCY = 3
 const POLL_INTERVAL_MS = 2500
 const POLL_TIMEOUT_MS = 5 * 60 * 1000
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024 // 25MB public demo limit
+
+function isAllowedFileType(file: File): boolean {
+  if (file.type.startsWith("image/") || file.type.startsWith("audio/") || file.type.startsWith("video/")) {
+    return true
+  }
+  const ext = file.name.split(".").pop()?.toLowerCase() || ""
+  const allowed = new Set([
+    "jpg", "jpeg", "png", "webp", "gif",
+    "mp3", "m4a", "wav", "flac", "ogg", "amr", "webm",
+    "mp4", "mov", "mkv",
+  ])
+  return allowed.has(ext)
+}
 
 interface QueueEntry {
   taskId: string
@@ -79,22 +94,44 @@ export function useUploadQueue(onCatalogChanged: () => void, onBatchDone: (ok: n
         const entry = pending.current.shift()
         if (!entry) return
         const { taskId, file } = entry
-        try {
-          patchTask(taskId, { status: "uploading" })
-          const { file_id, presigned_url, object_key } = await requestUploadUrl(
-            file.name,
-            file.type || "application/octet-stream",
-          )
-          await putPresigned(presigned_url, file)
 
-          patchTask(taskId, { status: "processing", fileId: file_id })
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          settle(
+            taskId,
+            false,
+            `Tệp vượt quá giới hạn 25MB (${(file.size / (1024 * 1024)).toFixed(1)}MB). Vui lòng chọn tệp nhỏ hơn.`,
+          )
+          continue
+        }
+        if (!isAllowedFileType(file)) {
+          settle(taskId, false, "Định dạng tệp không được hỗ trợ (chỉ nhận ảnh, audio, video).")
+          continue
+        }
+
+        try {
+          patchTask(taskId, { status: "uploading", progress: 0 })
+          const contentType = file.type || "application/octet-stream"
+          const { file_id, presigned_url } = await requestUploadUrl(
+            file.name,
+            contentType,
+            file.size,
+          )
+          await putPresigned(presigned_url, file, contentType, (percent) => {
+            patchTask(taskId, { progress: percent })
+          })
+
+          patchTask(taskId, { status: "processing", fileId: file_id, progress: 100 })
           // S3 ObjectCreated event notification tự động đưa message vào SQS IngestQueue.
           // Không gọi triggerProcess để tránh Double Ingestion (nhận 2 messages cho cùng 1 file).
           // Card hiện ngay trong thư viện với trạng thái INDEXING/READY khi poll
           onCatalogChanged()
           void pollUntilSettled(taskId, file_id)
         } catch (err: unknown) {
-          settle(taskId, false, err instanceof Error ? err.message : "Upload thất bại")
+          const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string }
+          const errorMsg =
+            axiosErr?.response?.data?.detail ||
+            (err instanceof Error ? err.message : "Upload thất bại")
+          settle(taskId, false, errorMsg)
         }
       }
     } finally {

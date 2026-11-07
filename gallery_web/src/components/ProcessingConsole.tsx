@@ -146,13 +146,30 @@ export const ProcessingConsole: React.FC<ProcessingConsoleProps> = ({ isOpen, on
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-semibold text-slate-200">{task.fileName}</span>
-                  <span
-                    className={`block truncate text-[11px] ${
-                      task.status === "failed" ? "text-rose-300" : "text-slate-500"
-                    }`}
-                  >
-                    {task.status === "failed" && task.error ? task.error : STATUS_TEXT[task.status]}
-                  </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`block truncate text-[11px] ${
+                        task.status === "failed" ? "text-rose-300" : "text-slate-500"
+                      }`}
+                    >
+                      {task.status === "failed" && task.error
+                        ? task.error
+                        : task.status === "uploading" && typeof task.progress === "number"
+                          ? `Đang tải lên S3 (${task.progress}%)`
+                          : STATUS_TEXT[task.status]}
+                    </span>
+                    {task.status === "uploading" && typeof task.progress === "number" && (
+                      <span className="font-mono text-[10px] font-bold text-sky-400">{task.progress}%</span>
+                    )}
+                  </div>
+                  {task.status === "uploading" && typeof task.progress === "number" && (
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
+                      <div
+                        className="h-full bg-gradient-to-r from-sky-400 to-violet-500 transition-all duration-150"
+                        style={{ width: `${task.progress}%` }}
+                      />
+                    </div>
+                  )}
                 </span>
               </div>
             ))}

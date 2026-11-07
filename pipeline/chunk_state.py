@@ -2,6 +2,15 @@
 
 Handles individual chunk lifecycle states (PENDING, PROCESSING, DONE, FAILED) and
 ensures race-condition-free progress tracking via DynamoDB atomic ADD expressions.
+
+Key layout (STATIC, mirrors ``infra/template.yaml`` -> MetadataTable.KeySchema = ``file_id`` HASH only):
+
+    parent (MediaRecord)  Key = {"file_id": "<file_id>"}
+    chunk i               Key = {"file_id": "<file_id>#CHUNK#000i"}  + attribute parent_file_id="<file_id>"
+
+The layout is deliberately hard-coded instead of introspecting ``table.key_schema``: boto3
+lazy-loads that attribute through ``DescribeTable`` (and re-loads it after *every* resource
+action), which is an extra round-trip per call and an IAM action the Lambda roles did not hold.
 """
 
 from __future__ import annotations
@@ -9,7 +18,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import logging
+import time
 from typing import Any, Dict, List, Literal, Optional, Union
+
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from botocore.exceptions import ClientError, ParamValidationError
 
 from pipeline.chunking import TranscriptChunk
 
@@ -136,18 +149,36 @@ def get_default_store() -> MemoryChunkStore:
 # DYNAMODB BOTO3 ATOMIC HELPERS
 # ==============================================================================
 
-def _get_dynamo_key(table: Any, file_id: str, sk: Optional[str] = None) -> Dict[str, Any]:
-    """Resolve DynamoDB Key dict based on table key schema (supports both PK/SK and file_id)."""
-    key_schema = getattr(table, "key_schema", []) or []
-    key_names = [k.get("AttributeName") for k in key_schema if isinstance(k, dict)]
-    if "PK" in key_names:
-        key = {"PK": f"FILE#{file_id}"}
-        if "SK" in key_names:
-            key["SK"] = sk or "METADATA"
-        return key
-    if sk and (sk.startswith("CHUNK#") or sk == "CHUNK"):
-        return {"file_id": f"{file_id}#{sk}"}
-    return {"file_id": file_id}
+KEY_ATTRIBUTE = "file_id"          # template.yaml MetadataTable.KeySchema (HASH)
+CHUNK_KEY_MARKER = "#CHUNK#"
+
+
+def chunk_item_id(file_id: str, chunk_index: int) -> str:
+    """``file_id`` value stored for chunk items (single-key table layout)."""
+    return f"{file_id}{CHUNK_KEY_MARKER}{chunk_index:04d}"
+
+
+def is_chunk_item_id(value: Any) -> bool:
+    return isinstance(value, str) and CHUNK_KEY_MARKER in value
+
+
+def parent_key(file_id: str) -> Dict[str, Any]:
+    """DynamoDB Key of the parent MediaRecord item. No table introspection (no DescribeTable)."""
+    return {KEY_ATTRIBUTE: file_id}
+
+
+def chunk_key(file_id: str, chunk_index: int) -> Dict[str, Any]:
+    """DynamoDB Key of chunk ``chunk_index`` belonging to ``file_id``."""
+    return {KEY_ATTRIBUTE: chunk_item_id(file_id, chunk_index)}
+
+
+def _is_conditional_failure(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+
+
+def _read_parent_counters(table: Any, file_id: str) -> Dict[str, Any]:
+    response = table.get_item(Key=parent_key(file_id), ConsistentRead=True)
+    return response.get("Item") or {}
 
 
 def init_file_pipeline_state(
@@ -161,12 +192,12 @@ def init_file_pipeline_state(
         store_or_table.init_file(file_id, total_chunks, provisional_summary)
         return
 
-    # DynamoDB Table Resource
+    # DynamoDB Table Resource. Intentionally an upsert (no attribute_exists guard): the ingest
+    # worker always calls it with the real parent id, and standalone demos rely on it to seed state.
     if hasattr(store_or_table, "update_item"):
         now = get_utc_now_iso()
-        key = _get_dynamo_key(store_or_table, file_id, "METADATA")
         store_or_table.update_item(
-            Key=key,
+            Key=parent_key(file_id),
             UpdateExpression="SET total_chunks = :tot, chunks_completed = :zero, pipeline_status = :st, provisional_summary = :ps, updated_at = :now",
             ExpressionAttributeValues={
                 ":tot": total_chunks,
@@ -198,11 +229,10 @@ def save_chunks_batch(
             store_or_table.save_chunk(record)
         elif hasattr(store_or_table, "put_item"):
             item = record.to_item()
-            key_schema = getattr(store_or_table, "key_schema", []) or []
-            key_names = [k.get("AttributeName") for k in key_schema if isinstance(k, dict)]
-            if "file_id" in key_names and "SK" not in key_names:
-                item["file_id"] = f"{file_id}#CHUNK#{chunk.chunk_index:04d}"
-                item["parent_file_id"] = file_id
+            # Single-key layout: the chunk row gets its own partition key and points back to
+            # the parent through ``parent_file_id`` (what the Aggregator uses to resolve it).
+            item[KEY_ATTRIBUTE] = chunk_item_id(file_id, chunk.chunk_index)
+            item["parent_file_id"] = file_id
             store_or_table.put_item(Item=item)
 
 
@@ -212,42 +242,79 @@ def mark_chunk_completed(
     chunk_index: int,
     chunk_summary: str,
 ) -> Dict[str, Any]:
-    """Mark a chunk as DONE and perform ATOMIC increment on chunks_completed."""
+    """Mark a chunk as DONE and perform ATOMIC increment on chunks_completed.
+
+    Both writes are guarded with ConditionExpressions so that:
+      * a wrong key can never materialise a ghost item (UpdateItem is an upsert by default),
+      * an at-least-once redelivery of the same chunk event cannot double-count the parent.
+    The returned dict always carries ``skipped=True`` when nothing was incremented.
+    """
     if isinstance(store_or_table, MemoryChunkStore):
         return store_or_table.mark_completed(file_id, chunk_index, chunk_summary)
 
     # DynamoDB Table Resource
     now = get_utc_now_iso()
-    # 1. Update chunk item
-    chunk_key = _get_dynamo_key(store_or_table, file_id, f"CHUNK#{chunk_index:04d}")
-    store_or_table.update_item(
-        Key=chunk_key,
-        UpdateExpression="SET #st = :done, summary = :sum, updated_at = :now",
-        ExpressionAttributeNames={"#st": "status"},
-        ExpressionAttributeValues={
-            ":done": "DONE",
-            ":sum": chunk_summary,
-            ":now": now,
-        },
-    )
+    # 1. Chunk item: (PENDING|PROCESSING|FAILED) -> DONE, only if the row exists and is not DONE yet.
+    try:
+        store_or_table.update_item(
+            Key=chunk_key(file_id, chunk_index),
+            UpdateExpression="SET #st = :done, summary = :sum, updated_at = :now",
+            ConditionExpression=f"attribute_exists({KEY_ATTRIBUTE}) AND #st <> :done",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":done": "DONE",
+                ":sum": chunk_summary,
+                ":now": now,
+            },
+        )
+    except ClientError as exc:
+        if not _is_conditional_failure(exc):
+            raise
+        parent = _read_parent_counters(store_or_table, file_id)
+        logger.info(
+            "chunk_completion_skipped file_id=%s idx=%d reason=missing_or_already_done", file_id, chunk_index
+        )
+        return {
+            "chunk_index": chunk_index,
+            "status": "DONE",
+            "skipped": True,
+            "chunks_completed": int(parent.get("chunks_completed", 0)),
+            "total_chunks": int(parent.get("total_chunks", 0)),
+        }
 
-    # 2. Atomic counter increment on parent metadata item
-    parent_key = _get_dynamo_key(store_or_table, file_id, "METADATA")
-    response = store_or_table.update_item(
-        Key=parent_key,
-        UpdateExpression="ADD chunks_completed :inc SET updated_at = :now",
-        ExpressionAttributeValues={
-            ":inc": 1,
-            ":now": now,
-        },
-        ReturnValues="ALL_NEW",
-    )
-    attributes = response.get("Attributes", {})
+    # 2. Atomic counter increment on the parent item. Requires the Tier-2 state to have been
+    #    initialised (total_chunks present): never create a stub, never finalise against a
+    #    default total of 1.
+    try:
+        response = store_or_table.update_item(
+            Key=parent_key(file_id),
+            UpdateExpression="ADD chunks_completed :inc SET updated_at = :now",
+            ConditionExpression=f"attribute_exists({KEY_ATTRIBUTE}) AND attribute_exists(total_chunks)",
+            ExpressionAttributeValues={
+                ":inc": 1,
+                ":now": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+        attributes = response.get("Attributes", {})
+        skipped = False
+    except ClientError as exc:
+        if not _is_conditional_failure(exc):
+            raise
+        logger.warning(
+            "parent_counter_skipped file_id=%s idx=%d reason=parent_missing_or_tier2_not_initialised",
+            file_id,
+            chunk_index,
+        )
+        attributes = _read_parent_counters(store_or_table, file_id)
+        skipped = True
+
     return {
         "chunk_index": chunk_index,
         "status": "DONE",
+        "skipped": skipped,
         "chunks_completed": int(attributes.get("chunks_completed", 0)),
-        "total_chunks": int(attributes.get("total_chunks", 1)),
+        "total_chunks": int(attributes.get("total_chunks", 0)),
     }
 
 
@@ -265,10 +332,11 @@ def mark_chunk_failed(
         return store_or_table.mark_failed(file_id, chunk_index, err, max_retries)
 
     now = get_utc_now_iso()
-    chunk_key = _get_dynamo_key(store_or_table, file_id, f"CHUNK#{chunk_index:04d}")
     response = store_or_table.update_item(
-        Key=chunk_key,
+        Key=chunk_key(file_id, chunk_index),
         UpdateExpression="ADD retry_count :inc SET #st = :failed, last_error = :err, updated_at = :now",
+        # Guard: never materialise a ghost row for a chunk that does not exist.
+        ConditionExpression=f"attribute_exists({KEY_ATTRIBUTE})",
         ExpressionAttributeNames={"#st": "status"},
         ExpressionAttributeValues={
             ":inc": 1,
@@ -281,26 +349,136 @@ def mark_chunk_failed(
     return response.get("Attributes", {})
 
 
-def get_file_chunks(store_or_table: Any, file_id: str) -> List[Dict[str, Any]]:
-    """Retrieve all chunks for a file sorted strictly by chunk_index."""
+MAX_CHUNKS_PER_FILE = 1000          # sanity bound for total_chunks read from the parent row
+_BATCH_GET_PAGE = 100                # DynamoDB BatchGetItem hard limit (keys per request)
+_BATCH_GET_MAX_ROUNDS = 8            # UnprocessedKeys retry rounds per page
+_FALLBACK_SCAN_PAGE_LIMIT = 250      # items evaluated per Scan page in the legacy fallback
+_FALLBACK_SCAN_MAX_PAGES = 40        # hard stop for the fallback (<= 10,000 evaluated items)
+
+_SERIALIZER = TypeSerializer()
+_DESERIALIZER = TypeDeserializer()
+
+
+def _encode_keys(keys: List[Dict[str, Any]], native: bool) -> List[Dict[str, Any]]:
+    if native:
+        return list(keys)
+    return [{name: _SERIALIZER.serialize(value) for name, value in key.items()} for key in keys]
+
+
+def _batch_get_chunks(table: Any, file_id: str, total_chunks: int) -> List[Dict[str, Any]]:
+    """Strongly-consistent keyed reads of every chunk row of ``file_id`` (no table Scan).
+
+    Chunk keys are deterministic (``<id>#CHUNK#000i`` for i < total_chunks), so the whole set
+    is fetched with ceil(N/100) BatchGetItem calls regardless of table size.
+
+    ``table.meta.client`` of a ``boto3.resource("dynamodb").Table(...)`` carries boto3's
+    high-level DynamoDB transform (native Python <-> AttributeValue), so keys/items are exchanged
+    as plain Python. If a raw low-level client is ever injected instead, botocore rejects the
+    native keys with ParamValidationError and we switch to explicit (de)serialisation.
+    """
+    client = table.meta.client
+    table_name = table.name  # resource identifier: does NOT trigger DescribeTable (table_name would)
+    keys = [chunk_key(file_id, index) for index in range(total_chunks)]
+    native = True
+    items: List[Dict[str, Any]] = []
+    for start in range(0, len(keys), _BATCH_GET_PAGE):
+        page = keys[start : start + _BATCH_GET_PAGE]
+        request: Optional[Dict[str, Any]] = {
+            table_name: {"Keys": _encode_keys(page, native), "ConsistentRead": True}
+        }
+        rounds = 0
+        while request:
+            try:
+                response = client.batch_get_item(RequestItems=request)
+            except ParamValidationError:
+                if not native:
+                    raise
+                native = False
+                request = {table_name: {"Keys": _encode_keys(page, native), "ConsistentRead": True}}
+                continue
+            for raw in response.get("Responses", {}).get(table_name, []):
+                items.append(raw if native else {name: _DESERIALIZER.deserialize(value) for name, value in raw.items()})
+            unprocessed = (response.get("UnprocessedKeys") or {}).get(table_name, {})
+            if not unprocessed.get("Keys"):
+                break
+            rounds += 1
+            if rounds >= _BATCH_GET_MAX_ROUNDS:
+                logger.warning(
+                    "batch_get_chunks_unprocessed_keys_dropped file_id=%s remaining=%d",
+                    file_id,
+                    len(unprocessed["Keys"]),
+                )
+                break
+            time.sleep(min(0.05 * (2**rounds), 1.0))
+            request = {table_name: unprocessed}
+    return items
+
+
+def _scan_chunks_bounded(table: Any, file_id: str) -> List[Dict[str, Any]]:
+    """Legacy fallback when the parent carries no ``total_chunks``: paginated, page-bounded Scan.
+
+    ``Limit`` caps the items evaluated per page and ``_FALLBACK_SCAN_MAX_PAGES`` caps the total
+    work, so a large table can neither exhaust Lambda memory nor run past the function timeout.
+    """
+    from boto3.dynamodb.conditions import Attr
+
+    scan_kwargs: Dict[str, Any] = {
+        "FilterExpression": Attr("parent_file_id").eq(file_id)
+        | Attr(KEY_ATTRIBUTE).begins_with(f"{file_id}{CHUNK_KEY_MARKER}"),
+        "Limit": _FALLBACK_SCAN_PAGE_LIMIT,
+        "ConsistentRead": True,
+    }
+    items: List[Dict[str, Any]] = []
+    pages = 0
+    while True:
+        response = table.scan(**scan_kwargs)
+        items.extend(response.get("Items", []))
+        pages += 1
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        if pages >= _FALLBACK_SCAN_MAX_PAGES:
+            logger.warning(
+                "chunk_scan_page_bound_reached file_id=%s pages=%d chunk_rows=%d", file_id, pages, len(items)
+            )
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+    return items
+
+
+def get_file_chunks(
+    store_or_table: Any,
+    file_id: str,
+    total_chunks: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve all chunks for a file sorted strictly by chunk_index.
+
+    DynamoDB path: read ``total_chunks`` from the parent (unless given) and fetch the chunk rows
+    by key with BatchGetItem. Only when the parent carries no Tier-2 state (legacy rows) does it
+    fall back to a bounded Scan.
+    """
     if isinstance(store_or_table, MemoryChunkStore):
         return store_or_table.list_chunks(file_id)
 
-    key_schema = getattr(store_or_table, "key_schema", []) or []
-    key_names = [k.get("AttributeName") for k in key_schema if isinstance(k, dict)]
-    from boto3.dynamodb.conditions import Attr, Key
+    if total_chunks is None:
+        parent = _read_parent_counters(store_or_table, file_id)
+        total_chunks = int(parent.get("total_chunks", 0) or 0)
 
-    if "PK" in key_names:
-        response = store_or_table.query(
-            KeyConditionExpression=Key("PK").eq(f"FILE#{file_id}") & Key("SK").begins_with("CHUNK#")
-        )
-        items = response.get("Items", [])
+    if 0 < total_chunks <= MAX_CHUNKS_PER_FILE:
+        items = _batch_get_chunks(store_or_table, file_id, total_chunks)
     else:
-        response = store_or_table.scan(
-            FilterExpression=Attr("parent_file_id").eq(file_id) | Attr("file_id").begins_with(f"{file_id}#CHUNK#")
-        )
-        items = response.get("Items", [])
+        if total_chunks > MAX_CHUNKS_PER_FILE:
+            logger.warning(
+                "total_chunks_exceeds_bound file_id=%s total=%d bound=%d -> bounded scan",
+                file_id,
+                total_chunks,
+                MAX_CHUNKS_PER_FILE,
+            )
+        items = _scan_chunks_bounded(store_or_table, file_id)
 
+    # Only genuine chunk rows carry chunk_index; this drops any legacy/ghost rows such as
+    # "<id>#CHUNK#0000#CHUNK#0000" that a previous buggy release may have left behind.
+    items = [item for item in items if "chunk_index" in item]
     items.sort(key=lambda x: int(x.get("chunk_index", 0)))
     return items
 

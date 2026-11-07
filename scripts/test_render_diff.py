@@ -2,7 +2,9 @@ import subprocess, os, html, json, time
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options
 
-old_xml = subprocess.check_output(['git', 'show', 'HEAD:docs/agentsys-architecture.drawio'], cwd='d:/Code/Thuc_Tap/agent_sys').decode('utf-8')
+from pathlib import Path
+AGENT_SYS_DIR = Path(__file__).resolve().parents[1]
+old_xml = subprocess.check_output(['git', 'show', 'HEAD:docs/agentsys-architecture.drawio'], cwd=str(AGENT_SYS_DIR)).decode('utf-8')
 config = {
     'highlight': '#0000ff',
     'nav': False,

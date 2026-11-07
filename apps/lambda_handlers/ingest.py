@@ -49,7 +49,7 @@ def handle_eventbridge_transcribe(event: dict) -> dict:
 
 
 def handler(event, context):
-    reset_runtime()
+    # reset_runtime() omitted to preserve Boto3 connection pools across warm Lambda containers
 
     # 1. Handle Amazon EventBridge Events (Transcribe Job State Change)
     if event.get("source") == "aws.transcribe":
@@ -84,8 +84,8 @@ def handler(event, context):
                                 logger.info("skip_duplicate_direct_action file_id=%s already READY", file_id)
                                 processed.append({"file_id": getattr(existing, "file_id", file_id), "status": existing.status})
                                 continue
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning("Duplicate check failed for direct action file_id %s: %s", file_id, exc, exc_info=True)
                     logger.info("sqs_direct_action action=%s file_id=%s key=%s", action, file_id, key)
                     item = ingest_object(file_id=file_id, object_key=key, filename=filename, content_type=content_type)
                     processed.append({"file_id": item.file_id, "status": item.status})
@@ -105,8 +105,8 @@ def handler(event, context):
                         logger.info("skip_duplicate_s3_ingest file_id=%s already READY", file_id)
                         processed.append({"file_id": getattr(existing, "file_id", file_id), "status": existing.status})
                         continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Duplicate check failed for S3 ingest file_id %s: %s", file_id, exc, exc_info=True)
                 logger.info("s3_ingest bucket=%s key=%s", bucket, key)
                 item = ingest_object(file_id=file_id, object_key=key, filename=filename)
                 processed.append({"file_id": item.file_id, "status": item.status})

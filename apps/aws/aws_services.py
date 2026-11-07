@@ -124,7 +124,7 @@ class S3ObjectStore:
         self.client = _client("s3")
         self.bucket = settings.MEDIA_BUCKET
 
-    def presign_put(self, object_key: str, content_type: str, expires: int = 3600) -> str:
+    def presign_put(self, object_key: str, content_type: str, expires: int = 900) -> str:
         return self.client.generate_presigned_url(
             "put_object",
             Params={
@@ -486,7 +486,7 @@ def _read_transcript_payload(uri: str, output_key: str) -> dict:
     # 2. Fallback to HTTPS URL (AWS-managed bucket with presigned link)
     if uri and uri.startswith("https://"):
         try:
-            with urllib.request.urlopen(uri, timeout=15) as response:
+            with urllib.request.urlopen(uri, timeout=15) as response:  # nosec: B310
                 return json.loads(response.read().decode("utf-8"))
         except Exception as http_exc:
             logger.warning("Could not read transcript from URL (%s): %s", uri, http_exc)

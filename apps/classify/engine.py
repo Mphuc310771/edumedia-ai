@@ -106,10 +106,11 @@ def _embed(text: str, bedrock_client=None) -> list[float]:
     return []
 
 
-def _nearest(text: str, prototypes: dict[str, str], bedrock_client=None) -> tuple[str | None, float]:
-    if not text.strip() or not prototypes:
+def _nearest(text: str | None, prototypes: dict[str, str], bedrock_client=None) -> tuple[str | None, float]:
+    clean_text = (text or "").strip()
+    if not clean_text or not prototypes:
         return None, 0.0
-    query = _embed(text, bedrock_client=bedrock_client)
+    query = _embed(clean_text, bedrock_client=bedrock_client)
     if not query:
         return None, 0.0
     ranked: list[tuple[str, float]] = []
@@ -160,14 +161,16 @@ def _is_document_like(labels: Sequence[str], text: str) -> bool:
     return _has_any(blob, DOCUMENT_LABEL_HINTS) or _ocr_substantial(text)
 
 
-def infer_category(media_type: str, labels: Sequence[str], text: str, bedrock_client=None) -> str:
+def infer_category(media_type: str, labels: Sequence[str] | None, text: str | None, bedrock_client=None) -> str:
     if media_type == "video":
         return "videos"
     if media_type == "audio":
         return "study"
 
-    labels_text = " ".join(labels)
-    full_text = f"{labels_text} {text}"
+    safe_labels = list(labels or [])
+    safe_text = text or ""
+    labels_text = " ".join(safe_labels)
+    full_text = f"{labels_text} {safe_text}"
 
     # 1. Multi-channel FlashText keyword scoring
     visual_scores = category_index().score(labels_text, labels_text)
@@ -180,11 +183,11 @@ def infer_category(media_type: str, labels: Sequence[str], text: str, bedrock_cl
         scores[key] = int(vis * 1.5 + txt)
 
     # 2. Context-aware category boosts + Computer Vision Layout Analysis
-    if _has_any(_blob(text), RECEIPT_HINTS):
+    if _has_any(_blob(safe_text), RECEIPT_HINTS):
         scores["receipts"] += 25
 
     from apps.classify.vision_layout import analyze_visual_layout
-    layout = analyze_visual_layout(labels, text)
+    layout = analyze_visual_layout(safe_labels, safe_text)
     if layout["is_scene_dominant"]:
         scores["scenes"] += 20
     if layout["is_living_dominant"]:
@@ -192,12 +195,12 @@ def infer_category(media_type: str, labels: Sequence[str], text: str, bedrock_cl
             if visual_scores.get(lk, 0) > 0:
                 scores[lk] += 15
 
-    subj = infer_subject(list(labels), text, "", "")
+    subj = infer_subject(safe_labels, safe_text, "", "")
     if subj != "none":
         scores["study"] += 25  # Strong academic subject signal
-    if _has_any(_blob(text), EXAM_HINTS):
+    if _has_any(_blob(safe_text), EXAM_HINTS):
         scores["study"] += 20
-    if _is_document_like(labels, text) and (subj != "none" or scores.get("study", 0) > 0):
+    if _is_document_like(safe_labels, safe_text) and (subj != "none" or scores.get("study", 0) > 0):
         scores["study"] += 15
 
     # 3. Rank categories and evaluate confidence margin
@@ -222,14 +225,14 @@ def infer_category(media_type: str, labels: Sequence[str], text: str, bedrock_cl
 
 
 def infer_subject(
-    labels: List[str],
-    ocr_text: str,
-    transcript: str,
-    filename: str = "",
+    labels: Sequence[str] | None,
+    ocr_text: str | None = "",
+    transcript: str | None = "",
+    filename: str | None = "",
     bedrock_client=None,
 ) -> str:
     _ = bedrock_client
-    full_text = " ".join([*labels, ocr_text or "", transcript or "", filename or ""])
+    full_text = " ".join([*(labels or []), ocr_text or "", transcript or "", filename or ""])
     if not fold_text(full_text).strip():
         return "none"
     best, score = subject_index().best("", full_text)

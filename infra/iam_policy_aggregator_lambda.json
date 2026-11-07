@@ -2,15 +2,18 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DynamoDBTableAndStreamAccess",
+      "Sid": "DynamoDBStreamAndTableAccess",
       "Effect": "Allow",
       "Action": [
         "dynamodb:GetItem",
+        "dynamodb:BatchGetItem",
         "dynamodb:UpdateItem",
         "dynamodb:Query",
+        "dynamodb:Scan",
         "dynamodb:DescribeStream",
         "dynamodb:GetRecords",
-        "dynamodb:GetShardIterator"
+        "dynamodb:GetShardIterator",
+        "dynamodb:DescribeTable"
       ],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:*:table/AgentSysMediaMetadata",
@@ -27,43 +30,41 @@
       "Resource": "*"
     },
     {
-      "Sid": "BedrockNovaLiteInvocationOnly",
+      "Sid": "BedrockInvocation",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel"
       ],
       "Resource": [
-        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:us-east-1:*:inference-profile/*"
       ]
     },
     {
-      "Sid": "SQSQueueAndDLQAccess",
+      "Sid": "SQSStreamDLQAccess",
       "Effect": "Allow",
       "Action": [
-        "sqs:SendMessage",
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:GetQueueAttributes"
+        "sqs:SendMessage"
       ],
       "Resource": [
-        "arn:aws:sqs:us-east-1:*:agentsys-ingest-queue",
-        "arn:aws:sqs:us-east-1:*:agentsys-ingest-dlq",
         "arn:aws:sqs:us-east-1:*:agentsys-aggregator-stream-dlq"
       ]
     },
     {
-      "Sid": "S3TranscriptAndMediaRead",
+      "Sid": "CustomMetrics",
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject"
+        "cloudwatch:PutMetricData"
       ],
-      "Resource": [
-        "arn:aws:s3:::agentsys-media-bucket/transcripts/*",
-        "arn:aws:s3:::agentsys-media-bucket/uploads/*"
-      ]
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "cloudwatch:namespace": "AgentSys"
+        }
+      }
     },
     {
-      "Sid": "CloudWatchStandardLogs",
+      "Sid": "CloudWatchLambdaLogs",
       "Effect": "Allow",
       "Action": [
         "logs:CreateLogGroup",
@@ -71,7 +72,7 @@
         "logs:PutLogEvents"
       ],
       "Resource": [
-        "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/agentsys-*"
+        "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/agentsys-aggregator:*"
       ]
     }
   ]

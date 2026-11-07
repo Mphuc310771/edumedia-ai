@@ -6,11 +6,12 @@ Pipeline flow:
        - Images: Amazon Rekognition (DetectLabels, DetectText) + JPEG thumbnail generation.
        - Audio/Video: Amazon Transcribe (Vietnamese speech-to-text transcription).
     3. Classification & Categorization: Heuristic rule-based and Bedrock LLM taxonomy classification.
-    4. Vector Embedding: Amazon Titan Text Embeddings (downsampled from 1536-d to 256-d).
+    4. Vector Embedding: Amazon Titan Text Embeddings v2 (256-d output; native default 1024-d).
     5. Catalog Persistence: Save indexed MediaRecord item into Amazon DynamoDB.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -18,11 +19,12 @@ from typing import Any, Optional
 
 from apps.aws.providers import get_runtime
 from apps.domain import CATEGORY_LABELS, SUBJECT_LABELS, MediaRecord, infer_category, infer_media_type, infer_subject, resolve_subject, usable_ocr_text
-from pipeline.aggregator_lambda import reduce_and_finalize
 from pipeline.chunk_state import (
+    KEY_ATTRIBUTE,
     MemoryChunkStore,
+    get_utc_now_iso,
     init_file_pipeline_state,
-    mark_chunk_completed,
+    parent_key,
     save_chunks_batch,
 )
 from pipeline.chunking import chunk_transcribe_json
@@ -172,7 +174,13 @@ def _maybe_embed(record: MediaRecord) -> None:
         return
     from apps.search.vector_engine import maybe_store_embedding
 
-    blob = " ".join([record.filename, " ".join(record.labels), record.ocr_text, record.transcript, record.summary])
+    blob = " ".join([
+        record.filename or "",
+        " ".join(record.labels or []),
+        record.ocr_text or "",
+        record.transcript or "",
+        record.summary or "",
+    ])
     record.embedding = maybe_store_embedding(blob, bedrock_client=bedrock_client)
 
 
@@ -189,6 +197,25 @@ def _write_thumb(file_id: str, object_key: str) -> Optional[str]:
     except Exception as exc:
         logger.warning("thumbnail skipped file_id=%s: %s", file_id, exc)
         return None
+
+
+def _offload_transcript_if_large(record: MediaRecord, transcript: str, runtime: Any) -> str:
+    """Offload transcripts exceeding 250KB to S3 to prevent DynamoDB 400KB limit overflow."""
+    if not transcript:
+        return ""
+    if len(transcript.encode("utf-8")) > 250 * 1024:
+        bucket = getattr(getattr(runtime, "store", None), "bucket", "") or os.environ.get("MEDIA_BUCKET", "agentsys-media-local")
+        s3_key = f"transcripts/raw/{record.file_id}.json"
+        raw_json = json.dumps({"file_id": record.file_id, "transcript": transcript}, ensure_ascii=False).encode("utf-8")
+        if hasattr(runtime, "store") and hasattr(runtime.store, "put_bytes"):
+            try:
+                runtime.store.put_bytes(s3_key, raw_json, "application/json")
+            except Exception as exc:
+                logger.warning("Failed to offload raw transcript to S3 for %s: %s", record.file_id, exc, exc_info=True)
+        record.transcript_s3_uri = f"s3://{bucket}/{s3_key}"
+        record.has_extended_transcript = True
+        return transcript[:15000] + " ... [Full transcript stored in S3]"
+    return transcript
 
 
 def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None, content_type: str = "") -> MediaRecord:
@@ -246,7 +273,7 @@ def ingest_object(file_id: str, object_key: str, filename: Optional[str] = None,
         record.category = infer_category(media_type, labels, blob, bedrock_client=bedrock_client)
         record.labels = translate_labels(labels)
         record.ocr_text = usable_ocr_text(ocr)
-        record.transcript = transcript
+        record.transcript = _offload_transcript_if_large(record, transcript, runtime)
         record.subject = infer_subject(record.labels, record.ocr_text, transcript, name, bedrock_client=bedrock_client)
         record.subject = resolve_subject(record)
         record.summary = _build_summary(record)
@@ -399,6 +426,33 @@ def _refine_chunk_with_bedrock(
         return (clean[:190] + "...") if len(clean) > 190 else clean
 
 
+def _mark_record_ready(runtime: Any, record: MediaRecord) -> None:
+    """Flip the catalog record to READY without a full PutItem.
+
+    ``DynamoCatalog.put`` is a PutItem (whole-item replace) and would erase the Tier-2
+    bookkeeping (``total_chunks`` / ``chunks_completed`` / ``provisional_summary``) written by
+    ``init_file_pipeline_state``. On DynamoDB we therefore patch just the status fields with an
+    UpdateItem; non-DynamoDB catalogs (tests, standalone) fall back to ``put``.
+    """
+    record.status = "READY"
+    record.error = None
+    table = getattr(runtime.catalog, "table", None)
+    if table is None or not hasattr(table, "update_item"):
+        runtime.catalog.put(record)
+        return
+    table.update_item(
+        Key=parent_key(record.file_id),
+        UpdateExpression="SET #st = :ready, pipeline_status = :ps, updated_at = :now REMOVE #err",
+        ConditionExpression=f"attribute_exists({KEY_ATTRIBUTE})",
+        ExpressionAttributeNames={"#st": "status", "#err": "error"},
+        ExpressionAttributeValues={
+            ":ready": "READY",
+            ":ps": record.pipeline_status,
+            ":now": get_utc_now_iso(),
+        },
+    )
+
+
 def apply_transcribe_job(job_name: str, job_status: str) -> dict:
     runtime = get_runtime()
     record = find_record_for_transcribe_job(job_name)
@@ -430,26 +484,27 @@ def apply_transcribe_job(job_name: str, job_status: str) -> dict:
         runtime.catalog.put(record)
         return {"ok": False, "file_id": record.file_id, "error": record.error, "source": "EventBridge"}
 
-    record.transcript = transcript
+    raw_transcript = transcript
+    record.transcript = _offload_transcript_if_large(record, raw_transcript, runtime)
     record.labels = translate_labels(["Giọng nói", "Ghi âm"])
     bedrock_client = getattr(runtime.planner, "client", None)
     record.category = infer_category(
         record.media_type,
         record.labels,
-        f"{transcript} {record.filename}",
+        f"{raw_transcript} {record.filename}",
         bedrock_client=bedrock_client,
     )
     record.subject = infer_subject(
         record.labels,
         record.ocr_text,
-        transcript,
+        raw_transcript,
         record.filename,
         bedrock_client=bedrock_client,
     )
     record.subject = resolve_subject(record)
 
     # 1. Tier 1 Fast Extraction: Independent Announcements & Topic Overview (~10-50ms)
-    tier1_meta = extract_smart_summary(transcript)
+    tier1_meta = extract_smart_summary(raw_transcript)
     announcements = tier1_meta.get("announcements", [])
     topic_summary = tier1_meta.get("topic_summary", "")
 
@@ -461,41 +516,49 @@ def apply_transcribe_job(job_name: str, job_status: str) -> dict:
     provisional_summary = " · ".join(provisional_parts) if provisional_parts else _build_summary(record)
 
     record.summary = provisional_summary
-    record.pipeline_status = "PROVISIONAL_READY"
-    record.status = "READY"
     record.error = None
     record.analysis_source = "transcribe"
     _maybe_embed(record)
-    runtime.catalog.put(record)
-    runtime.metrics.emit("MediaIngested", 1)
-    logger.info("tier1_provisional_ready file_id=%s summary=%r", record.file_id, provisional_summary[:100])
 
-    # 2. Tier 2: Silence & Segment-Aware Chunking & Map-Reduce Dispatch
+    # 2. Tier 2: Silence & Segment-Aware Chunking. The Tier-2 state (parent counters + PENDING
+    #    chunk rows) is made durable BEFORE the record is announced READY, so a DynamoDB Streams
+    #    consumer can never observe READY without pipeline state, and the counters cannot be
+    #    wiped by a later full-item write.
     table = getattr(runtime.catalog, "table", None)
     store_or_table = table if table is not None else MemoryChunkStore()
 
-    payload_for_chunking = transcribe_payload or {"results": {"transcripts": [{"transcript": transcript}]}}
+    payload_for_chunking = transcribe_payload or {"results": {"transcripts": [{"transcript": raw_transcript}]}}
     chunks = chunk_transcribe_json(payload_for_chunking, record.file_id)
 
+    # 2a. Persist the heavy Tier-1 fields while the record is still INDEXING. DynamoCatalog.put
+    #     is a PutItem (whole-item replace), so it must land BEFORE init_file_pipeline_state
+    #     writes total_chunks / chunks_completed onto the same item.
+    record.status = "INDEXING"
+    record.pipeline_status = "REFINING" if chunks else "PROVISIONAL_READY"
+    runtime.catalog.put(record)
+
+    # 2b. Durable Tier-2 state. A failure here is surfaced (FAILED + re-raise -> Lambda error,
+    #     alarms, retry) instead of leaving a READY record whose refinement silently never runs.
     if chunks:
-        logger.info("tier2_chunking_start file_id=%s total_chunks=%d", record.file_id, len(chunks))
-        init_file_pipeline_state(store_or_table, record.file_id, total_chunks=len(chunks), provisional_summary=tier1_meta)
-        save_chunks_batch(store_or_table, record.file_id, chunks)
-
-        # Refine each chunk with Bedrock Nova Lite
-        model_id = getattr(runtime.planner, "model_id", "amazon.nova-lite-v1:0")
-        for chunk in chunks:
-            chunk_summary = _refine_chunk_with_bedrock(chunk.text, bedrock_client=bedrock_client, model_id=model_id)
-            mark_chunk_completed(store_or_table, record.file_id, chunk.chunk_index, chunk_summary=chunk_summary)
-
-        # Reduce & Finalize Phase
-        reduce_result = reduce_and_finalize(record.file_id, store_or_table=store_or_table)
-        final_summary = reduce_result.get("final_summary")
-        if final_summary:
-            record.summary = final_summary
-            record.pipeline_status = "REFINED_COMPLETED"
+        try:
+            init_file_pipeline_state(
+                store_or_table, record.file_id, total_chunks=len(chunks), provisional_summary=tier1_meta
+            )
+            save_chunks_batch(store_or_table, record.file_id, chunks)
+        except Exception as exc:
+            logger.exception("tier2_init_failed file_id=%s", record.file_id)
+            record.status = "FAILED"
+            record.pipeline_status = "REFINE_INIT_FAILED"
+            record.error = f"Tier-2 chunk pipeline init failed: {exc}"
             runtime.catalog.put(record)
-            logger.info("tier2_map_reduce_completed file_id=%s final_summary=%r", record.file_id, final_summary[:100])
+            runtime.metrics.emit("MediaIngestFailed", 1)
+            raise
+        logger.info("tier2_chunking_saved_for_aggregator file_id=%s total_chunks=%d", record.file_id, len(chunks))
+
+    # 3. Only now flip the record to READY (UpdateItem: keeps the counters written in 2b).
+    _mark_record_ready(runtime, record)
+    runtime.metrics.emit("MediaIngested", 1)
+    logger.info("tier1_provisional_ready file_id=%s summary=%r", record.file_id, provisional_summary[:100])
 
     logger.info("dynamodb_transcript_updated file_id=%s", record.file_id)
     return {"ok": True, "file_id": record.file_id, "status": "READY", "source": "EventBridge"}

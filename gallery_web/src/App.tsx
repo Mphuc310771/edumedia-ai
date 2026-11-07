@@ -11,17 +11,21 @@ import { ProcessingConsole } from "./components/ProcessingConsole"
 import { DevPanel } from "./components/DevPanel"
 import { useMediaCatalog } from "./hooks/useMediaCatalog"
 import { useUploadQueue } from "./hooks/useUploadQueue"
-import { fetchHealth, deleteMedia, clearAllMedia, getSessionToken, clearSession } from "./api/client"
+import { fetchHealth, deleteMedia, clearAllMedia, getSessionToken, clearSession, hasDefaultApiKey } from "./api/client"
 import { LoginScreen } from "./components/LoginScreen"
 import { parseSize, SortMode, ViewMode } from "./catalog"
 import { HealthResponse, MediaItem, SmartCategory } from "./types"
 import { AlertCircle, CheckCircle2, CheckSquare, SearchX, Trash2, UploadCloud, X } from "lucide-react"
+import { SkeletonGrid } from "./components/SkeletonGrid"
 
 export default function App() {
-  const [authed, setAuthed] = useState(() => Boolean(getSessionToken()))
-  const [activeCategory, setActiveCategory] = useState<SmartCategory>("all")
-  const [activeSubject, setActiveSubject] = useState("all")
-  const [searchQuery, setSearchQuery] = useState("")
+  const [authed, setAuthed] = useState(() => Boolean(getSessionToken() || hasDefaultApiKey()))
+  const initialParams = useMemo(() => new URLSearchParams(window.location.search), [])
+  const [activeCategory, setActiveCategory] = useState<SmartCategory>(
+    () => (initialParams.get("cat") as SmartCategory) || "all",
+  )
+  const [activeSubject, setActiveSubject] = useState(() => initialParams.get("sub") || "all")
+  const [searchQuery, setSearchQuery] = useState(() => initialParams.get("q") || "")
   const [sort, setSort] = useState<SortMode>("newest")
   const [view, setView] = useState<ViewMode>("grid")
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -87,6 +91,37 @@ export default function App() {
     window.addEventListener("agentsys-unauthorized", onUnauthorized)
     return () => window.removeEventListener("agentsys-unauthorized", onUnauthorized)
   }, [])
+
+  // Kích hoạt tìm kiếm AI ngay lập tức nếu URL có sẵn tham số ?q=... (cho người ngoài test bấm link là thấy kết quả)
+  useEffect(() => {
+    const q = initialParams.get("q")
+    if (q && authed) {
+      void runAiSearch(q)
+    }
+  }, [authed, runAiSearch, initialParams])
+
+  // Đồng bộ search query và filter lên URL Query Params để dễ dàng chia sẻ link demo
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (searchQuery.trim()) params.set("q", searchQuery.trim())
+    if (activeCategory && activeCategory !== "all") params.set("cat", activeCategory)
+    if (activeSubject && activeSubject !== "all") params.set("sub", activeSubject)
+
+    const queryStr = params.toString()
+    const newUrl = queryStr ? `?${queryStr}` : window.location.pathname
+    if (window.location.search !== (queryStr ? `?${queryStr}` : "")) {
+      window.history.replaceState(null, "", newUrl)
+    }
+  }, [searchQuery, activeCategory, activeSubject])
+
+  const handleSelectPrompt = (promptQuery: string, category?: SmartCategory) => {
+    setSearchQuery(promptQuery)
+    if (category) {
+      setActiveCategory(category)
+      setActiveSubject("all")
+    }
+    void runAiSearch(promptQuery)
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -177,10 +212,14 @@ export default function App() {
   )
 
   const handleClearAll = async () => {
-    if (!confirm("Xóa toàn bộ thư viện? Hành động này không thể hoàn tác.")) return
-    await clearAllMedia()
-    await reload()
-    triggerToast("Đã dọn sạch thư viện")
+    if (!confirm("Dọn dẹp thư viện? Các tệp bạn tải lên sẽ bị xóa, các tệp bài giảng mẫu demo sẽ được bảo vệ an toàn.")) return
+    try {
+      await clearAllMedia()
+      await reload()
+      triggerToast("Đã dọn dẹp các tệp tải lên (tệp mẫu demo được giữ an toàn)")
+    } catch (err: unknown) {
+      triggerToast(err instanceof Error ? err.message : "Dọn dẹp thất bại")
+    }
   }
 
   const toggleSelect = (id: string) => {
@@ -200,12 +239,27 @@ export default function App() {
   const handleDeleteSelected = async () => {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
-    if (!confirm(`Xóa ${ids.length} tệp đã chọn?`)) return
-    const results = await Promise.allSettled(ids.map((id) => deleteMedia(id)))
+    const protectedItems = allItems.filter(
+      (item) =>
+        ids.includes(item.id) &&
+        (item.is_demo_protected ||
+          item.isDemoProtected ||
+          item.filename?.toLowerCase().startsWith("sample_") ||
+          item.filename?.toLowerCase().startsWith("demo_") ||
+          item.id?.toLowerCase().startsWith("sample-") ||
+          item.id?.toLowerCase().startsWith("demo-")),
+    )
+    if (protectedItems.length === ids.length) {
+      triggerToast("Các tệp đã chọn đều là bài giảng mẫu được bảo vệ demo. Không thể xóa.")
+      return
+    }
+    const deletableIds = ids.filter((id) => !protectedItems.some((item) => item.id === id))
+    if (!confirm(`Xóa ${deletableIds.length} tệp đã chọn? (${protectedItems.length} tệp mẫu demo được giữ lại)`)) return
+    const results = await Promise.allSettled(deletableIds.map((id) => deleteMedia(id)))
     const okCount = results.filter((result) => result.status === "fulfilled").length
     await reload()
     exitSelectMode()
-    triggerToast(`Đã xóa ${okCount}/${ids.length} tệp`)
+    triggerToast(`Đã xóa ${okCount} tệp (${protectedItems.length} tệp mẫu demo được bảo vệ)`)
   }
 
   const handleSelectCategory = (category: SmartCategory) => {
@@ -283,6 +337,7 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onSubmitAi={() => void runAiSearch(searchQuery)}
+          onSelectPrompt={handleSelectPrompt}
           aiLoading={aiLoading}
           aiActive={aiActive}
           searchInputRef={searchInputRef}
@@ -322,15 +377,20 @@ export default function App() {
 
           {!hasLibrary && !loading && <EmptyState onFiles={handleUploadFiles} />}
 
+          {/* Skeleton loading khi tải trang hoặc khi đang tìm kiếm AI */}
           {loading && !hasLibrary && (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="skeleton aspect-[4/3]" style={{ animationDelay: `${i * 60}ms` }} />
-              ))}
+            <div className="mb-6">
+              <SkeletonGrid count={10} />
             </div>
           )}
 
-          {hasLibrary && sortedItems.length === 0 && !loading && (
+          {aiLoading && (
+            <div className="mb-6">
+              <SkeletonGrid count={6} />
+            </div>
+          )}
+
+          {hasLibrary && sortedItems.length === 0 && !loading && !aiLoading && (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 py-20 text-center animate-fade-in">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl surface text-slate-500">
                 <SearchX className="h-6 w-6" />
@@ -351,7 +411,7 @@ export default function App() {
             </div>
           )}
 
-          {sortedItems.length > 0 && view === "grid" && (
+          {!aiLoading && sortedItems.length > 0 && view === "grid" && (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {sortedItems.map((item, index) => (
                 <MediaCard
@@ -360,6 +420,7 @@ export default function App() {
                   index={index}
                   selectMode={selectMode}
                   selected={selectedIds.has(item.id)}
+                  searchQuery={searchQuery}
                   onClick={() => (selectMode ? toggleSelect(item.id) : setSelectedId(item.id))}
                   onRetry={() => handleRetry(item)}
                 />
@@ -367,7 +428,7 @@ export default function App() {
             </div>
           )}
 
-          {sortedItems.length > 0 && view === "list" && (
+          {!aiLoading && sortedItems.length > 0 && view === "list" && (
             <div className="overflow-hidden rounded-2xl surface">
               {sortedItems.map((item, index) => (
                 <MediaListRow
@@ -376,6 +437,7 @@ export default function App() {
                   index={index}
                   selectMode={selectMode}
                   selected={selectedIds.has(item.id)}
+                  searchQuery={searchQuery}
                   onClick={() => (selectMode ? toggleSelect(item.id) : setSelectedId(item.id))}
                 />
               ))}
@@ -421,16 +483,26 @@ export default function App() {
         <MediaDetailModal
           items={sortedItems}
           index={selectedIndex}
+          searchQuery={searchQuery}
           onClose={() => setSelectedId(null)}
           onNavigate={(delta) => {
             const next = sortedItems[selectedIndex + delta]
             if (next) setSelectedId(next.id)
           }}
           onDelete={async (id) => {
-            await deleteMedia(id)
-            setSelectedId(null)
-            await reload()
-            triggerToast("Đã xóa tệp")
+            try {
+              await deleteMedia(id)
+              setSelectedId(null)
+              await reload()
+              triggerToast("Đã xóa tệp thành công")
+            } catch (err: unknown) {
+              const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+              if (axiosErr?.response?.status === 403) {
+                triggerToast(axiosErr.response.data?.detail || "Tệp bài giảng mẫu được bảo vệ demo. Không thể xóa.")
+              } else {
+                triggerToast("Lỗi khi xóa tệp. Vui lòng thử lại.")
+              }
+            }
           }}
           onRetry={(item) => {
             setSelectedId(null)

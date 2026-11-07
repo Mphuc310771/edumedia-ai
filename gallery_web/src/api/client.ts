@@ -1,7 +1,17 @@
+import axios from "axios"
 import { AgentQueryResponse, HealthResponse, MediaItem } from "../types"
 
-const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "")
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  ""
+).replace(/\/$/, "")
+const DEFAULT_API_KEY = (import.meta.env.VITE_API_KEY || "").trim()
 const TOKEN_KEY = "agentsys_token"
+
+export function hasDefaultApiKey(): boolean {
+  return Boolean(DEFAULT_API_KEY)
+}
 
 export function getSessionToken(): string {
   try {
@@ -22,7 +32,12 @@ export function clearSession() {
 function headers(): HeadersInit {
   const value: Record<string, string> = { "Content-Type": "application/json" }
   const token = getSessionToken()
-  if (token) value.Authorization = `Bearer ${token}`
+  if (token) {
+    value.Authorization = `Bearer ${token}`
+  }
+  if (DEFAULT_API_KEY) {
+    value["X-API-Key"] = DEFAULT_API_KEY
+  }
   return value
 }
 
@@ -97,26 +112,69 @@ export async function queryMedia(userQuery: string): Promise<AgentQueryResponse>
   return response.json()
 }
 
-export async function requestUploadUrl(filename: string, contentType: string) {
-  const response = await readOk(
-    await fetch(`${API_BASE}/api/v1/media/upload-url`, {
+export async function requestUploadUrl(filename: string, contentType: string, sizeBytes?: number) {
+  const payload: Record<string, unknown> = {
+    filename,
+    content_type: contentType || "application/octet-stream",
+  }
+  if (typeof sizeBytes === "number") {
+    payload.size_bytes = sizeBytes
+  }
+  let response = await fetch(`${API_BASE}/api/upload-url`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(payload),
+  })
+  if (response.status === 404) {
+    response = await fetch(`${API_BASE}/api/v1/media/upload-url`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ filename, content_type: contentType || "application/octet-stream" }),
-    }),
-  )
-  return response.json() as Promise<{ file_id: string; presigned_url: string; object_key: string }>
+      body: JSON.stringify(payload),
+    })
+  }
+  const okResp = await readOk(response)
+  return okResp.json() as Promise<{
+    file_id: string
+    presigned_url: string
+    upload_url?: string
+    object_key: string
+  }>
 }
 
-export async function putPresigned(url: string, file: File): Promise<void> {
-  const response = await fetch(resolveUrl(url), {
-    method: "PUT",
-    headers: { "Content-Type": file.type || "application/octet-stream" },
-    body: file,
-  })
-  if (!response.ok) {
-    throw new Error(`Upload thất bại (${response.status}). Kiểm tra CORS bucket S3.`)
+export async function putPresigned(
+  url: string,
+  file: File,
+  contentType?: string,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  const targetUrl = resolveUrl(url)
+  const ct = contentType || file.type || "application/octet-stream"
+  try {
+    await axios.put(targetUrl, file, {
+      headers: {
+        "Content-Type": ct,
+      },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          onProgress(percent)
+        }
+      },
+    })
+  } catch (err: unknown) {
+    if (axios.isAxiosError(err)) {
+      const status = err.response?.status
+      throw new Error(`Upload thất bại (${status || "lỗi mạng"}). Kiểm tra CORS bucket S3.`)
+    }
+    throw err
   }
+}
+
+export async function fetchRawTranscript(fileId: string): Promise<any> {
+  const response = await readOk(
+    await fetch(`${API_BASE}/api/v1/media/items/${fileId}/transcript-raw`, { headers: headers() }),
+  )
+  return response.json()
 }
 
 export async function triggerProcess(payload: {

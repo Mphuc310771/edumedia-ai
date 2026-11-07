@@ -3,15 +3,17 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from apps.api.auth import verify_api_key
 from apps.api.auth_routes import router as auth_router
-from apps.api.endpoints import router as api_router
+from apps.api.endpoints import generate_upload_url, process_agent_query, router as api_router
 from apps.api.rate_limit import limiter
+from apps.api.schemas import AgentQueryRequest, AgentQueryResponse, UploadUrlRequest, UploadUrlResponse
 from config.settings import settings
 
 logging.basicConfig(
@@ -70,6 +72,22 @@ async def add_security_headers(request: Request, call_next):
     return response
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(api_router, prefix="/api/v1/media", tags=["Media"])
+
+
+@app.post("/api/upload-url", response_model=UploadUrlResponse, dependencies=[Depends(verify_api_key)], tags=["Media"], include_in_schema=False)
+@app.post("/upload-url", response_model=UploadUrlResponse, dependencies=[Depends(verify_api_key)], tags=["Media"], include_in_schema=False)
+def upload_url_alias(payload: UploadUrlRequest):
+    return generate_upload_url(payload)
+
+
+@app.post("/api/v1/agent/query", response_model=AgentQueryResponse, dependencies=[Depends(verify_api_key)], tags=["Search"], include_in_schema=False)
+@app.post("/agent/query", response_model=AgentQueryResponse, dependencies=[Depends(verify_api_key)], tags=["Search"], include_in_schema=False)
+@app.post("/api/search", response_model=AgentQueryResponse, dependencies=[Depends(verify_api_key)], tags=["Search"], include_in_schema=False)
+@limiter.limit("20/minute")
+def search_alias(request: Request, payload: AgentQueryRequest):
+    return process_agent_query(request, payload)
+
+
 
 
 @app.exception_handler(Exception)

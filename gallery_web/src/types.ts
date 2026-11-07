@@ -36,6 +36,12 @@ export interface MediaItem {
   analysisSource?: string
   subject?: string
   subjectLabel?: string
+  transcript_s3_uri?: string
+  has_extended_transcript?: boolean
+  transcriptS3Uri?: string
+  hasExtendedTranscript?: boolean
+  is_demo_protected?: boolean
+  isDemoProtected?: boolean
 }
 
 export const OFF_MAJOR_SUBJECTS = new Set([

@@ -153,3 +153,66 @@ def test_handler_eventbridge_transcribe_completion():
     result = handler(event, None)
     assert result["ok"] is True
     assert result.get("source") == "EventBridge"
+
+
+def test_apply_transcribe_job_large_transcript_s3_offload(monkeypatch):
+    import json
+    from apps.domain import MediaRecord
+    from apps.workers.ingestion import apply_transcribe_job
+
+    large_transcript = "Bài giảng chuyên sâu Hệ điều hành và Vi xử lý. " * 6000
+    assert len(large_transcript.encode("utf-8")) > 250 * 1024
+
+    class FakeSpeech:
+        def read_job_transcript(self, job_name):
+            return large_transcript
+
+    class FakeCatalog:
+        def __init__(self):
+            self.record = MediaRecord(
+                file_id="large-transcribe-demo",
+                filename="lecture.mp3",
+                s3_key="uploads/lecture.mp3",
+                media_type="audio",
+                content_type="audio/mpeg",
+                status="INDEXING",
+                transcribe_job_name="agentsys--large-transcribe-demo--uploads_lecture_mp3",
+            )
+
+        def list_all(self):
+            return [self.record]
+
+        def get(self, file_id):
+            return self.record if file_id == "large-transcribe-demo" else None
+
+        def put(self, record):
+            self.record = record
+
+    class FakeStore:
+        bucket = "test-media-bucket"
+        def __init__(self):
+            self.saved = {}
+        def put_bytes(self, key, body, content_type):
+            self.saved[key] = body
+
+    class FakeRuntime:
+        provider = "aws"
+        catalog = FakeCatalog()
+        speech = FakeSpeech()
+        store = FakeStore()
+        planner = object()
+        metrics = type("M", (), {"emit": staticmethod(lambda *a, **k: None)})()
+
+    monkeypatch.setattr("apps.workers.ingestion.get_runtime", lambda: FakeRuntime)
+    result = apply_transcribe_job("agentsys--large-transcribe-demo--uploads_lecture_mp3", "COMPLETED")
+    assert result["ok"] is True
+    assert result["status"] == "READY"
+    record = FakeRuntime.catalog.record
+    assert record.has_extended_transcript is True
+    assert record.transcript_s3_uri == "s3://test-media-bucket/transcripts/raw/large-transcribe-demo.json"
+    assert "[Full transcript stored in S3]" in record.transcript
+    assert len(record.transcript) <= 16000
+    raw_saved = json.loads(FakeRuntime.store.saved["transcripts/raw/large-transcribe-demo.json"].decode("utf-8"))
+    assert raw_saved["file_id"] == "large-transcribe-demo"
+    assert raw_saved["transcript"] == large_transcript
+

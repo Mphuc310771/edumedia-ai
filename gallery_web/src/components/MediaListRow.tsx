@@ -1,16 +1,18 @@
 import React, { useState } from "react"
 import { AlertCircle, Check, ChevronRight, Image as ImageIcon, Loader2, Mic, Video } from "lucide-react"
 import { isOffMajorSubject, MediaItem } from "../types"
+import { HighlightText } from "./HighlightText"
 
 interface MediaListRowProps {
   item: MediaItem
   index: number
   selectMode: boolean
   selected: boolean
+  searchQuery?: string
   onClick: () => void
 }
 
-export const MediaListRow: React.FC<MediaListRowProps> = ({ item, index, selectMode, selected, onClick }) => {
+export const MediaListRow: React.FC<MediaListRowProps> = ({ item, index, selectMode, selected, searchQuery, onClick }) => {
   const [imgError, setImgError] = useState(false)
   const displayThumb = item.thumbnailUrl || item.url
   const offMajor = isOffMajorSubject(item.subject)
@@ -69,9 +71,11 @@ export const MediaListRow: React.FC<MediaListRowProps> = ({ item, index, selectM
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-white group-hover:text-violet-200" title={item.filename}>
-          {item.filename}
+          <HighlightText text={item.filename} keywords={searchQuery || item.matchedOn} />
         </p>
-        <p className="truncate text-xs text-slate-500">{item.summary || item.categoryLabel}</p>
+        <p className="truncate text-xs text-slate-500">
+          <HighlightText text={item.summary || item.categoryLabel} keywords={searchQuery || item.matchedOn} />
+        </p>
       </div>
 
       <div className="hidden shrink-0 items-center gap-1.5 md:flex">

@@ -23,7 +23,7 @@ def test_template_uses_least_privilege_and_required_services():
     assert "agentsys-ingest-dlq" in text
     assert "transcribe.amazonaws.com" in text
     assert "category-index" in text
-    assert "foundation-model/*" in text
+    assert "foundation-model/amazon.nova-lite-v1:0" in text
     assert "MediaIngestFailed" in text
     assert "ApproximateNumberOfMessagesVisible" in text
     assert "Timeout: 120" in text
@@ -36,6 +36,30 @@ def test_template_uses_least_privilege_and_required_services():
     assert "${MediaBucket.Arn}/uploads/*" in text
     assert "${MediaBucket.Arn}/transcripts/*" in text
     assert "${MediaBucket.Arn}/thumbs/*" in text
+
+
+def test_template_metadata_table_is_single_key_and_lambdas_may_describe_it():
+    """The chunk pipeline hard-codes a single-key layout; keep template and code in lock-step."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    # MetadataTable: file_id HASH only (no sort key anywhere in the stack)
+    assert "- AttributeName: file_id\n          KeyType: HASH" in text
+    assert "KeyType: RANGE" not in text
+    # dynamodb:DescribeTable on ApiFunction (health) + IngestFunction + AggregatorFunction
+    assert text.count("dynamodb:DescribeTable") >= 3
+    # Aggregator reads chunk rows by key (BatchGetItem) instead of scanning the table
+    assert "dynamodb:BatchGetItem" in text
+
+
+def test_template_alerts_have_a_real_subscriber_and_ingest_is_concurrency_capped():
+    text = TEMPLATE.read_text(encoding="utf-8")
+    # The 7 alarms fan out to SNS -> an email subscription must exist (parameterised, opt-out via "")
+    assert "AWS::SNS::Subscription" in text
+    assert "Protocol: email" in text
+    assert "Endpoint: !Ref AlertEmail" in text
+    assert "HasAlertEmail: !Not [!Equals [!Ref AlertEmail, \"\"]]" in text
+    assert text.count("AWS::CloudWatch::Alarm") == 7
+    # SQS event source mapping is capped so an upload burst cannot starve the API Lambda
+    assert "ScalingConfig:\n              MaximumConcurrency: 5" in text
 
 
 def test_no_legacy_local_stack_files():

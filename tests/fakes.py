@@ -142,6 +142,15 @@ class StubPlanner:
     client = None
 
     def plan(self, user_query: str) -> SearchPlan:
+        import time
+        from apps.aws.aws_services import _PLAN_CACHE, _PLAN_CACHE_TTL_SECONDS
+        cache_key = " ".join(user_query.strip().lower().split())
+        now = time.time()
+        if cache_key and cache_key in _PLAN_CACHE:
+            cached_at, cached_plan = _PLAN_CACHE[cache_key]
+            if now - cached_at < _PLAN_CACHE_TTL_SECONDS:
+                return cached_plan.model_copy(deep=True)
+
         query = user_query.lower()
         keywords = [token for token in re.findall(r"[\wÀ-ỹ]+", user_query) if len(token) > 2]
         media_type = None
@@ -161,7 +170,7 @@ class StubPlanner:
             subject = None
         elif category is None:
             category = "study"
-        return SearchPlan(
+        plan = SearchPlan(
             keywords=keywords[:8],
             media_type=media_type,
             category=category,
@@ -169,6 +178,9 @@ class StubPlanner:
             rationale="pytest stub planner — production uses Amazon Bedrock",
             planner_source="bedrock",
         )
+        if cache_key:
+            _PLAN_CACHE[cache_key] = (now, plan.model_copy(deep=True))
+        return plan
 
 
 # Aliases for backwards compatibility

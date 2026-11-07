@@ -1,7 +1,8 @@
+import json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Always load agent_sys/.env, even if uvicorn is started from another folder.
@@ -37,7 +38,11 @@ class Settings(BaseSettings):
         default="",
         description="Login password. Empty = use ADMIN_API_KEY",
     )
-    ALLOWED_ORIGINS: List[str] = Field(
+    FRONTEND_ORIGIN_URL: Optional[str] = Field(
+        default=None,
+        description="Production frontend URL or * (overrides/augments ALLOWED_ORIGINS)",
+    )
+    ALLOWED_ORIGINS: Union[List[str], str] = Field(
         default=[
             "http://localhost:3000",
             "http://127.0.0.1:3000",
@@ -47,6 +52,43 @@ class Settings(BaseSettings):
             "http://127.0.0.1:8000",
         ]
     )
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, value: Union[str, List[str], None]) -> List[str]:
+        default_origins = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+        if value is None:
+            return default_origins
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default_origins
+            if value.startswith("[") and value.endswith("]"):
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except Exception:
+                    pass
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+            if "*" in parts:
+                return ["*"]
+            # Merge with default local origins
+            combined = list(dict.fromkeys(default_origins + parts))
+            return combined
+        if isinstance(value, list):
+            items = [str(x).strip() for x in value if str(x).strip()]
+            if "*" in items:
+                return ["*"]
+            return list(dict.fromkeys(default_origins + items))
+        return default_origins
 
     AWS_REGION: str = Field(default="us-east-1")
     MEDIA_BUCKET: str = Field(default="agentsys-media-bucket")
@@ -71,6 +113,14 @@ class Settings(BaseSettings):
 
     TRANSCRIBE_POLL_SECONDS: int = 5
     TRANSCRIBE_MAX_WAIT_SECONDS: int = 180
+
+    def model_post_init(self, __context: object) -> None:
+        if self.FRONTEND_ORIGIN_URL:
+            extra = [x.strip() for x in self.FRONTEND_ORIGIN_URL.split(",") if x.strip()]
+            if "*" in extra:
+                self.ALLOWED_ORIGINS = ["*"]
+            elif self.ALLOWED_ORIGINS != ["*"]:
+                self.ALLOWED_ORIGINS = list(dict.fromkeys(list(self.ALLOWED_ORIGINS) + extra))
 
 
 settings = Settings()

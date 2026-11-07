@@ -11,12 +11,14 @@ import {
   Video,
 } from "lucide-react"
 import { isOffMajorSubject, MediaItem } from "../types"
+import { HighlightText } from "./HighlightText"
 
 interface MediaCardProps {
   item: MediaItem
   index: number
   selectMode: boolean
   selected: boolean
+  searchQuery?: string
   onClick: () => void
   onRetry: () => void
 }
@@ -32,7 +34,7 @@ function TypeBadge({ type }: { type: MediaItem["type"] }) {
   )
 }
 
-export const MediaCard: React.FC<MediaCardProps> = ({ item, index, selectMode, selected, onClick, onRetry }) => {
+export const MediaCard: React.FC<MediaCardProps> = ({ item, index, selectMode, selected, searchQuery, onClick, onRetry }) => {
   const [imgError, setImgError] = useState(false)
   const displayThumb = item.thumbnailUrl || item.url
   const indexing = item.status === "INDEXING"
@@ -144,13 +146,21 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, index, selectMode, s
                 {item.categoryLabel || item.category}
               </span>
             )}
+            {(item.has_extended_transcript || item.hasExtendedTranscript || Boolean(item.transcript_s3_uri)) && (
+              <span
+                className="truncate rounded-lg border border-sky-400/40 bg-sky-500/25 px-1.5 py-0.5 text-[10px] font-bold text-sky-200 backdrop-blur-md"
+                title="Bản ghi dài - Đã lưu trữ an toàn trên S3"
+              >
+                S3
+              </span>
+            )}
           </div>
         </div>
         <TypeBadge type={item.type} />
       </div>
 
       {/* Overlay tên tệp */}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/45 to-transparent px-3 pb-2.5 pt-10">
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-3 pb-2.5 pt-10">
         {item.matchedOn && item.matchedOn.length > 0 && (
           <span className="mb-1.5 inline-flex max-w-full items-center gap-1 truncate rounded-md border border-violet-400/30 bg-violet-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-violet-100 backdrop-blur-md">
             <Sparkles className="h-2.5 w-2.5 shrink-0" />
@@ -158,8 +168,16 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, index, selectMode, s
           </span>
         )}
         <p className="truncate text-[13px] font-bold text-white" title={item.filename}>
-          {item.filename}
+          <HighlightText text={item.filename} keywords={searchQuery || item.matchedOn} />
         </p>
+        {(item.transcript || item.ocrText) && (searchQuery || (item.matchedOn && item.matchedOn.length > 0)) && (
+          <p className="mt-0.5 line-clamp-1 text-[11px] font-normal text-slate-300">
+            <HighlightText
+              text={item.transcript ? `“${item.transcript.slice(0, 75)}...”` : item.ocrText?.slice(0, 75) || ""}
+              keywords={searchQuery || item.matchedOn}
+            />
+          </p>
+        )}
         <p className="truncate font-mono text-[11px] text-slate-400">
           {item.size} · {item.date?.split(" ")[0]}
         </p>

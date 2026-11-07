@@ -276,3 +276,79 @@ def test_ingest_handler_direct_sqs_action():
     assert res["ok"] is True
     assert len(res["processed"]) == 1
     assert res["processed"][0]["file_id"] == "direct-sqs-item"
+
+
+def test_get_real_client_ip():
+    from apps.api.rate_limit import get_real_client_ip
+    from starlette.requests import Request
+
+    # Case 1: X-Forwarded-For with multiple proxies
+    scope = {
+        "type": "http",
+        "headers": [(b"x-forwarded-for", b"203.0.113.195, 70.41.3.18, 150.172.238.178")],
+        "client": ("10.0.0.1", 12345),
+    }
+    req = Request(scope)
+    assert get_real_client_ip(req) == "203.0.113.195"
+
+    # Case 2: No X-Forwarded-For, fallback to client.host
+    scope2 = {
+        "type": "http",
+        "headers": [],
+        "client": ("192.168.1.100", 12345),
+    }
+    req2 = Request(scope2)
+    assert get_real_client_ip(req2) == "192.168.1.100"
+
+    # Case 3: Neither present, fallback to 127.0.0.1
+    scope3 = {
+        "type": "http",
+        "headers": [],
+        "client": None,
+    }
+    req3 = Request(scope3)
+    assert get_real_client_ip(req3) == "127.0.0.1"
+
+
+def test_fold_text_null_bytes():
+    from apps.classify.text import fold_text
+
+    assert fold_text("Tiếng\x00Việt") == "tieng viet"
+    assert fold_text("\x00\x00abc\x00def\x00") == "abc def"
+    assert fold_text(None) == ""
+
+
+def test_large_transcript_s3_offloading():
+    import json
+    from apps.aws.providers import get_runtime
+    from apps.domain import MediaRecord
+    from apps.workers.ingestion import _offload_transcript_if_large
+
+    runtime = get_runtime()
+    record = MediaRecord(
+        file_id="large-audio-test",
+        filename="lecture.mp3",
+        s3_key="uploads/large-audio-test.mp3",
+        media_type="audio",
+        content_type="audio/mpeg",
+        status="INDEXING",
+    )
+    # Generate transcript > 250KB
+    large_text = "Học phần Kiến trúc máy tính và Hệ điều hành. " * 6000
+    assert len(large_text.encode("utf-8")) > 250 * 1024
+
+    truncated = _offload_transcript_if_large(record, large_text, runtime)
+    assert record.has_extended_transcript is True
+    assert record.transcript_s3_uri is not None
+    assert "transcripts/raw/large-audio-test.json" in record.transcript_s3_uri
+    assert len(truncated) <= 16000
+    assert "[Full transcript stored in S3]" in truncated
+
+    # Verify S3 store received the raw content
+    s3_key = "transcripts/raw/large-audio-test.json"
+    stored_bytes = runtime.store.get_bytes(s3_key)
+    assert len(stored_bytes) > 250 * 1024
+    data = json.loads(stored_bytes.decode("utf-8"))
+    assert data["file_id"] == "large-audio-test"
+    assert data["transcript"] == large_text
+

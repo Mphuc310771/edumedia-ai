@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UploadUrlRequest(BaseModel):
     filename: str = Field(..., examples=["lecture-board.jpg"])
     content_type: str = Field(..., examples=["image/jpeg"])
+    size_bytes: Optional[int] = Field(default=None, description="Kích thước tệp tính bằng bytes")
 
 
 class UploadUrlResponse(BaseModel):
@@ -15,6 +16,7 @@ class UploadUrlResponse(BaseModel):
     presigned_url: str
     object_key: str
     method: str = "PUT"
+    upload_url: Optional[str] = None
 
 
 class ProcessRequest(BaseModel):
@@ -31,8 +33,17 @@ class StatusResponse(BaseModel):
 
 
 class AgentQueryRequest(BaseModel):
-    user_query: str = Field(..., examples=["Tìm đoạn thầy dặn thi cuối kỳ"])
+    user_query: str = Field(default="", examples=["Tìm đoạn thầy dặn thi cuối kỳ"])
+    query: Optional[str] = None
     file_id: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def unify_query(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            q = data.get("user_query") or data.get("query") or ""
+            data["user_query"] = q
+        return data
 
 
 class MediaItemOut(BaseModel):
@@ -60,6 +71,12 @@ class MediaItemOut(BaseModel):
     analysisSource: str = ""
     subject: str = "none"
     subjectLabel: str = ""
+    transcript_s3_uri: Optional[str] = None
+    has_extended_transcript: bool = False
+    transcriptS3Uri: Optional[str] = None
+    hasExtendedTranscript: bool = False
+    is_demo_protected: bool = False
+    isDemoProtected: bool = False
 
 
 class AgentQueryResponse(BaseModel):

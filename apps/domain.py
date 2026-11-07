@@ -55,6 +55,9 @@ class MediaRecord(BaseModel):
     subject: str = "none"
     thumb_key: Optional[str] = None
     pipeline_status: Optional[str] = None
+    transcript_s3_uri: Optional[str] = None
+    has_extended_transcript: bool = False
+    is_demo_protected: bool = False
 
     @field_validator("size_bytes", mode="before")
     @classmethod
@@ -65,6 +68,21 @@ class MediaRecord(BaseModel):
             return int(float(value))
         except (ValueError, TypeError):
             return 0
+
+    @field_validator("ocr_text", "transcript", "summary", mode="before")
+    @classmethod
+    def coerce_text_fields(cls, value):
+        return "" if value is None else str(value)
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def coerce_subject(cls, value):
+        return "none" if not value or value == "null" else str(value)
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def coerce_labels(cls, value):
+        return [] if value is None else list(value)
 
 
 class SearchPlan(BaseModel):
@@ -237,16 +255,16 @@ def record_haystack(record: MediaRecord) -> str:
     """Build a consolidated, accent-folded search text string from all record fields."""
     subject = resolve_subject(record)
     parts = [
-        record.filename,
-        record.media_type,
-        record.category,
-        CATEGORY_LABELS.get(record.category, record.category),
+        record.filename or "",
+        record.media_type or "",
+        record.category or "",
+        CATEGORY_LABELS.get(record.category, record.category or ""),
         subject,
-        SUBJECT_LABELS.get(subject, subject),
+        SUBJECT_LABELS.get(subject, subject or ""),
         "ngoài ngành" if is_off_major_subject(subject) else "",
-        " ".join(record.labels),
-        record.ocr_text,
-        record.transcript,
-        record.summary,
+        " ".join(record.labels or []),
+        record.ocr_text or "",
+        record.transcript or "",
+        record.summary or "",
     ]
     return fold_text(" ".join(parts))

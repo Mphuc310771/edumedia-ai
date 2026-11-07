@@ -208,33 +208,28 @@ def test_handler_reports_batch_item_failure_on_exception():
 
 
 def test_reduce_and_finalize_dynamodb_condition_expression_with_moto():
-    """Verify real boto3 DynamoDB ConditionExpression syntax and ConditionalCheckFailedException handling using moto."""
+    """Verify real boto3 DynamoDB ConditionExpression syntax and ConditionalCheckFailedException handling using moto.
+
+    The table uses the EXACT key schema deployed by infra/template.yaml (``file_id`` HASH only) —
+    the previous PK/SK single-table variant did not exist in the stack and hid the production bug.
+    """
     import boto3
     from moto import mock_aws
 
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        # Create single-table DynamoDB resource
         table = dynamodb.create_table(
-            TableName="AggregatorSingleTableTest",
-            KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-            ],
+            TableName="AggregatorTemplateSchemaTest",
+            KeySchema=[{"AttributeName": "file_id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "file_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
 
         file_id = "moto-dynamo-race-001"
 
-        # 1. Insert parent metadata record
+        # 1. Insert parent metadata record (the MediaRecord item itself)
         table.put_item(
             Item={
-                "PK": f"FILE#{file_id}",
-                "SK": "METADATA",
                 "file_id": file_id,
                 "total_chunks": 2,
                 "chunks_completed": 2,
@@ -242,12 +237,11 @@ def test_reduce_and_finalize_dynamodb_condition_expression_with_moto():
             }
         )
 
-        # 2. Insert two chunk records
+        # 2. Insert two chunk rows exactly as save_chunks_batch lays them out
         table.put_item(
             Item={
-                "PK": f"FILE#{file_id}",
-                "SK": "CHUNK#0000",
-                "file_id": file_id,
+                "file_id": f"{file_id}#CHUNK#0000",
+                "parent_file_id": file_id,
                 "chunk_index": 0,
                 "summary": "Tóm tắt phần 1 từ Bedrock",
                 "status": "DONE",
@@ -255,9 +249,8 @@ def test_reduce_and_finalize_dynamodb_condition_expression_with_moto():
         )
         table.put_item(
             Item={
-                "PK": f"FILE#{file_id}",
-                "SK": "CHUNK#0001",
-                "file_id": file_id,
+                "file_id": f"{file_id}#CHUNK#0001",
+                "parent_file_id": file_id,
                 "chunk_index": 1,
                 "summary": "Tóm tắt phần 2 từ Bedrock",
                 "status": "DONE",
@@ -271,9 +264,11 @@ def test_reduce_and_finalize_dynamodb_condition_expression_with_moto():
         assert res_1["final_summary"] == "Tóm tắt phần 1 từ Bedrock · Tóm tắt phần 2 từ Bedrock"
 
         # Check item in DynamoDB
-        item_after_1 = table.get_item(Key={"PK": f"FILE#{file_id}", "SK": "METADATA"}).get("Item", {})
+        item_after_1 = table.get_item(Key={"file_id": file_id}).get("Item", {})
         assert item_after_1["pipeline_status"] == "REFINED_COMPLETED"
         assert item_after_1["summary"] == "Tóm tắt phần 1 từ Bedrock · Tóm tắt phần 2 từ Bedrock"
+        # Counters must survive finalisation (no PutItem wipe)
+        assert item_after_1["total_chunks"] == 2 and item_after_1["chunks_completed"] == 2
         original_updated_at = item_after_1["updated_at"]
 
         # 4. Call 2: Duplicate invocation -> triggers real boto3 ConditionalCheckFailedException
@@ -282,8 +277,13 @@ def test_reduce_and_finalize_dynamodb_condition_expression_with_moto():
         assert res_2["already_finalized"] is True
 
         # Verify DynamoDB table was NOT modified/corrupted
-        item_after_2 = table.get_item(Key={"PK": f"FILE#{file_id}", "SK": "METADATA"}).get("Item", {})
+        item_after_2 = table.get_item(Key={"file_id": file_id}).get("Item", {})
         assert item_after_2["updated_at"] == original_updated_at
         assert item_after_2["summary"] == "Tóm tắt phần 1 từ Bedrock · Tóm tắt phần 2 từ Bedrock"
+
+        # 5. Finalising an unknown id must NOT create a ghost parent row
+        ghost = reduce_and_finalize("does-not-exist", store_or_table=table)
+        assert ghost["pipeline_status"] == "REFINED_FAILED"
+        assert "Item" not in table.get_item(Key={"file_id": "does-not-exist"})
 
 

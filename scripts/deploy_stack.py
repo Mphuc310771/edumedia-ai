@@ -32,11 +32,28 @@ def _tool(name: str) -> str:
     return found
 
 
-def _admin_api_key() -> str:
+def _env_value(name: str) -> str:
     for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
-        if line.startswith("ADMIN_API_KEY="):
+        if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise SystemExit("ADMIN_API_KEY missing in .env")
+    return ""
+
+
+def _admin_api_key() -> str:
+    value = _env_value("ADMIN_API_KEY")
+    if not value:
+        raise SystemExit("ADMIN_API_KEY missing in .env")
+    return value
+
+
+def _alert_email() -> str:
+    """Optional ALERT_EMAIL in .env -> AlertEmail parameter (SNS subscriber of the 7 alarms)."""
+    return _env_value("ALERT_EMAIL")
+
+
+def _frontend_origin_url() -> str:
+    """Optional FRONTEND_ORIGIN_URL in .env -> FrontendOriginUrl parameter (CORS domain or *)."""
+    return _env_value("FRONTEND_ORIGIN_URL") or "*"
 
 
 def _run(cmd: list[str]) -> None:
@@ -56,7 +73,12 @@ def _stage_pack() -> None:
     print("staged", PACK, "for SAM CodeUri")
 
 
-def _write_samconfig(api_key: str) -> None:
+def _write_samconfig(api_key: str, alert_email: str = "", frontend_origin: str = "*") -> None:
+    overrides = f"ApiKey={api_key}"
+    if alert_email:
+        overrides += f" AlertEmail={alert_email}"
+    if frontend_origin:
+        overrides += f" FrontendOriginUrl={frontend_origin}"
     SAMCONFIG.write_text(
         "\n".join(
             [
@@ -68,7 +90,7 @@ def _write_samconfig(api_key: str) -> None:
                 "resolve_s3 = true",
                 "confirm_changeset = false",
                 "fail_on_empty_changeset = false",
-                f'parameter_overrides = "ApiKey={api_key}"',
+                f'parameter_overrides = "{overrides}"',
                 "",
             ]
         ),
@@ -124,10 +146,13 @@ def _delete_failed_stack(aws: str) -> None:
 
 def main() -> None:
     api_key = _admin_api_key()
+    alert_email = _alert_email()
+    if not alert_email:
+        print("ALERT_EMAIL not set in .env -> template default AlertEmail (placeholder) will be used")
     sam = _tool("sam")
     aws = _tool("aws")
     _stage_pack()
-    _write_samconfig(api_key)
+    _write_samconfig(api_key, alert_email, _frontend_origin_url())
     _delete_failed_stack(aws)
     _run([sam, "build", "--template-file", str(TEMPLATE)])
     _run(

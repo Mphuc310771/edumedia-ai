@@ -104,3 +104,63 @@ def test_chunk_failure_and_retry_tracking():
     res2 = mark_chunk_failed(store, file_id=file_id, chunk_index=0, error_msg="TimeoutError")
     assert res2["retry_count"] == 2
     assert "Timeout" in res2["last_error"]
+
+
+# ------------------------------------------------------------------------------------------
+# DynamoDB reader (moto; mock_aws is active through the autouse conftest fixture)
+# ------------------------------------------------------------------------------------------
+def _template_schema_table(name: str):
+    import boto3
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    table = dynamodb.create_table(
+        TableName=name,
+        BillingMode="PAY_PER_REQUEST",
+        KeySchema=[{"AttributeName": "file_id", "KeyType": "HASH"}],  # infra/template.yaml
+        AttributeDefinitions=[{"AttributeName": "file_id", "AttributeType": "S"}],
+    )
+    calls: list[str] = []
+    table.meta.client.meta.events.register("before-call.dynamodb", lambda **kw: calls.append(kw["model"].name))
+    return table, calls
+
+
+def test_get_file_chunks_uses_keyed_batch_reads_not_scan():
+    table, calls = _template_schema_table("ChunkReaderKeyed")
+    file_id = "long-lecture"
+    total = 120  # > 100 -> exercises the BatchGetItem 100-key paging
+    table.put_item(Item={"file_id": file_id, "total_chunks": total, "chunks_completed": 0, "pipeline_status": "REFINING"})
+    for i in reversed(range(total)):  # write out of order on purpose
+        table.put_item(
+            Item={"file_id": f"{file_id}#CHUNK#{i:04d}", "parent_file_id": file_id, "chunk_index": i, "status": "PENDING", "text": f"c{i}"}
+        )
+    # Ghost/legacy row that must never be treated as a chunk
+    table.put_item(Item={"file_id": f"{file_id}#CHUNK#0000#CHUNK#0000", "status": "DONE"})
+    calls.clear()
+
+    chunks = get_file_chunks(table, file_id)
+
+    assert [int(c["chunk_index"]) for c in chunks] == list(range(total))
+    assert all(c["parent_file_id"] == file_id for c in chunks)
+    assert calls.count("BatchGetItem") == 2  # 100 + 20 keys
+    assert "Scan" not in calls and "DescribeTable" not in calls
+
+
+def test_get_file_chunks_falls_back_to_bounded_scan_without_total_chunks():
+    from pipeline import chunk_state
+
+    table, calls = _template_schema_table("ChunkReaderFallback")
+    file_id = "legacy-lecture"
+    table.put_item(Item={"file_id": file_id, "status": "READY"})  # legacy parent: no Tier-2 counters
+    for i in range(3):
+        table.put_item(Item={"file_id": f"{file_id}#CHUNK#{i:04d}", "parent_file_id": file_id, "chunk_index": i, "status": "DONE"})
+    # Unrelated bulk rows so the scan has to paginate under the small page limit
+    for i in range(600):
+        table.put_item(Item={"file_id": f"other-{i:04d}", "status": "READY"})
+    calls.clear()
+
+    chunks = get_file_chunks(table, file_id)
+
+    assert [int(c["chunk_index"]) for c in chunks] == [0, 1, 2]
+    assert "BatchGetItem" not in calls
+    assert 1 < calls.count("Scan") <= chunk_state._FALLBACK_SCAN_MAX_PAGES  # paginated AND bounded
+    assert "DescribeTable" not in calls

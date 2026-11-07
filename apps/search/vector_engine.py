@@ -6,24 +6,24 @@ import json
 import logging
 import math
 import time
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from apps.classify.text import fold_text
 from apps.domain import MediaRecord, SearchHit, SearchPlan, matches_subject_filter, record_haystack
 
 logger = logging.getLogger(__name__)
 
-# Vector dimension: Subsampled from Titan's native 1536-d to 256-d to reduce
-# DynamoDB storage costs and payload size while retaining directional similarity.
+# Vector dimension: Titan Text Embeddings v2 is asked for 256-d output natively (its default is
+# 1024-d; 1536-d was the v1 model) -> 75% smaller DynamoDB items while retaining directional similarity.
 EMBEDDING_DIM = 256
 _TITAN_SKIP_UNTIL = 0.0
 _TITAN_RATE_COOLDOWN_SECONDS = 45
 
 
-def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
+def cosine_similarity(vec_a: Sequence[Any], vec_b: Sequence[Any]) -> float:
     """Calculate the cosine similarity between two float vectors.
 
-    Optimized with single-pass accumulation and unified norm calculation.
+    Optimized with single-pass accumulation, float coercion, and unified norm calculation.
 
     Args:
         vec_a: First numeric vector.
@@ -38,9 +38,10 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     norm_sq_a = 0.0
     norm_sq_b = 0.0
     for a, b in zip(vec_a, vec_b):
-        dot_product += a * b
-        norm_sq_a += a * a
-        norm_sq_b += b * b
+        fa, fb = float(a), float(b)
+        dot_product += fa * fb
+        norm_sq_a += fa * fa
+        norm_sq_b += fb * fb
     if norm_sq_a <= 0.0 or norm_sq_b <= 0.0:
         return 0.0
     denom = math.sqrt(norm_sq_a * norm_sq_b)
@@ -50,7 +51,7 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
 
 
 def _stable_bucket(text: str, dim: int) -> int:
-    digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+    digest = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
     return int(digest, 16) % dim
 
 
@@ -88,7 +89,7 @@ def compute_deterministic_embedding(text: str, dim: int = EMBEDDING_DIM) -> List
 def get_titan_embedding_with_source(text: str, bedrock_client=None) -> Tuple[List[float], str]:
     """Generate a vector embedding for text using Amazon Titan Text Embeddings on Bedrock.
 
-    Downsamples raw Titan embeddings (1536 dimensions) to 256 dimensions to minimize
+    Requests 256-dimensional output from Titan v2 (native default 1024-d) to minimize
     DynamoDB storage costs and payload size while retaining directional semantic similarity.
 
     Args:
@@ -106,40 +107,20 @@ def get_titan_embedding_with_source(text: str, bedrock_client=None) -> Tuple[Lis
     if time.time() < _TITAN_SKIP_UNTIL:
         return [], "off"
     try:
-        raw_embedding = []
-        # Ưu tiên dùng Amazon Titan Embeddings v2 với native 256 dimensions và L2 normalization
-        try:
-            body_v2 = json.dumps({"inputText": text[:4000], "dimensions": EMBEDDING_DIM, "normalize": True})
-            response = bedrock_client.invoke_model(
-                body=body_v2,
-                modelId="amazon.titan-embed-text-v2:0",
-                accept="application/json",
-                contentType="application/json",
-            )
-            response_body = json.loads(response.get("body").read())
-            raw_embedding = response_body.get("embedding", [])
-        except Exception as v2_err:
-            # Fallback về Titan v1 nếu tài khoản chưa bật v2
-            logger.debug("Titan v2 unavailable (%s), falling back to Titan v1", v2_err)
-            body_v1 = json.dumps({"inputText": text[:4000]})
-            response = bedrock_client.invoke_model(
-                body=body_v1,
-                modelId="amazon.titan-embed-text-v1",
-                accept="application/json",
-                contentType="application/json",
-            )
-            response_body = json.loads(response.get("body").read())
-            raw_embedding = response_body.get("embedding", [])
+        # Amazon Titan Embeddings v2 với native 256 dimensions và L2 normalization
+        body = json.dumps({"inputText": text[:4000], "dimensions": EMBEDDING_DIM, "normalize": True})
+        response = bedrock_client.invoke_model(
+            body=body,
+            modelId="amazon.titan-embed-text-v2:0",
+            accept="application/json",
+            contentType="application/json",
+        )
+        response_body = json.loads(response.get("body").read())
+        raw_embedding = response_body.get("embedding", [])
 
         if not raw_embedding:
             return [], "off"
-        if len(raw_embedding) == EMBEDDING_DIM:
-            return raw_embedding, "titan"
-        # Subsample vector từ 1536 xuống 256 chiều nếu rơi vào fallback Titan v1
-        step = len(raw_embedding) / EMBEDDING_DIM
-        projected = [raw_embedding[int(i * step)] for i in range(EMBEDDING_DIM)]
-        norm = math.sqrt(sum(x * x for x in projected))
-        return ([x / norm for x in projected] if norm > 0 else projected), "titan"
+        return raw_embedding, "titan"
     except Exception as exc:
         message = str(exc).lower()
         if "throttling" in message or "too many requests" in message:

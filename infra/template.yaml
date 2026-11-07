@@ -15,6 +15,22 @@ Parameters:
     Type: String
     Default: us-east-1
     Description: Region where the Bedrock model is enabled
+  AlertEmail:
+    Type: String
+    Default: agentsys-alerts@example.com
+    Description: >-
+      Email subscribed to agentsys-alerts-topic (destination of all 7 CloudWatch alarms).
+      SNS sends a confirmation link after deploy; the subscription stays PendingConfirmation
+      until it is clicked. Pass an empty string to deploy without a subscription.
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: Must be a valid email address or an empty string.
+  FrontendOriginUrl:
+    Type: String
+    Default: "*"
+    Description: Frontend origin domain for CORS (e.g. https://my-agent.vercel.app or * for open demo)
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
 
 Globals:
   Function:
@@ -33,6 +49,7 @@ Globals:
         ADMIN_API_KEY: !Ref ApiKey
         CLOUDWATCH_NAMESPACE: AgentSys
         INGEST_QUEUE_URL: !Ref IngestQueue
+        ALLOWED_ORIGINS: !Ref FrontendOriginUrl
   HttpApi:
     CorsConfiguration:
       AllowOrigins:
@@ -40,6 +57,9 @@ Globals:
         - http://127.0.0.1:3000
         - http://localhost:5174
         - http://127.0.0.1:5174
+        - http://localhost:8000
+        - http://127.0.0.1:8000
+        - !Ref FrontendOriginUrl
       AllowHeaders:
         - Content-Type
         - X-API-Key
@@ -93,7 +113,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: agentsys-ingest-queue
-      VisibilityTimeout: 180
+      VisibilityTimeout: 720
       MessageRetentionPeriod: 86400
       ReceiveMessageWaitTimeSeconds: 10
       SqsManagedSseEnabled: true
@@ -141,6 +161,9 @@ Resources:
               - http://127.0.0.1:3000
               - http://localhost:5174
               - http://127.0.0.1:5174
+              - http://localhost:8000
+              - http://127.0.0.1:8000
+              - !Ref FrontendOriginUrl
             ExposedHeaders: [ETag]
             MaxAge: 3000
       LifecycleConfiguration:
@@ -222,6 +245,7 @@ Resources:
           Projection:
             ProjectionType: ALL
       PointInTimeRecoverySpecification:
+        # PITR disabled to eliminate continuous backup storage charges in Dev/Lab (Cost Optimization Pillar); enable for enterprise production.
         PointInTimeRecoveryEnabled: false
 
   IngestFunction:
@@ -264,6 +288,10 @@ Resources:
                 - dynamodb:UpdateItem
                 - dynamodb:Scan
                 - dynamodb:Query
+                - dynamodb:BatchWriteItem
+                # Defense-in-depth: boto3 Table resources lazy-load metadata via DescribeTable.
+                # Code no longer introspects key_schema, but a future regression must not AccessDeny.
+                - dynamodb:DescribeTable
               Resource:
                 - !GetAtt MetadataTable.Arn
                 - !Sub ${MetadataTable.Arn}/index/category-index
@@ -275,6 +303,14 @@ Resources:
               Condition:
                 StringEquals:
                   cloudwatch:namespace: AgentSys
+            - Sid: BedrockInvoke
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.titan-embed-text-v2:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:inference-profile/*
       Events:
         FromQueue:
           Type: SQS
@@ -284,6 +320,11 @@ Resources:
             MaximumBatchingWindowInSeconds: 3
             FunctionResponseTypes:
               - ReportBatchItemFailures
+            # Cap SQS pollers: an upload burst must not consume the account's shared
+            # (new-account, ~10) unreserved concurrency and starve ApiFunction/AggregatorFunction.
+            # Excess messages simply wait in the queue (VisibilityTimeout 720s, DLQ after 3).
+            ScalingConfig:
+              MaximumConcurrency: 5
         TranscribeStateChange:
           Type: EventBridgeRule
           Properties:
@@ -315,11 +356,16 @@ Resources:
               Effect: Allow
               Action:
                 - dynamodb:GetItem
+                # Keyed chunk reads (<id>#CHUNK#000i) instead of table scans in get_file_chunks.
+                - dynamodb:BatchGetItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
+                - dynamodb:Scan
                 - dynamodb:DescribeStream
                 - dynamodb:GetRecords
                 - dynamodb:GetShardIterator
+                # Defense-in-depth (see IngestFunction.DynamoWrite).
+                - dynamodb:DescribeTable
               Resource:
                 - !GetAtt MetadataTable.Arn
                 - !Sub ${MetadataTable.Arn}/index/*
@@ -334,7 +380,7 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource:
-                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/*
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
                 - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:inference-profile/*
             - Sid: SQSStreamDLQAccess
               Effect: Allow
@@ -390,7 +436,10 @@ Resources:
                 - s3:PutObject
                 - s3:GetObject
                 - s3:DeleteObject
-              Resource: !Sub ${MediaBucket.Arn}/*
+              Resource:
+                - !Sub ${MediaBucket.Arn}/uploads/*
+                - !Sub ${MediaBucket.Arn}/thumbs/*
+                - !Sub ${MediaBucket.Arn}/direct/*
             - Sid: DynamoAccess
               Effect: Allow
               Action:
@@ -427,7 +476,8 @@ Resources:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
               Resource:
-                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/*
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.titan-embed-text-v2:0
                 - !Sub arn:aws:bedrock:${BedrockRegion}:${AWS::AccountId}:inference-profile/*
             - Sid: CustomMetrics
               Effect: Allow
@@ -442,6 +492,23 @@ Resources:
               Action:
                 - sqs:SendMessage
               Resource: !GetAtt IngestQueue.Arn
+
+  AgentSysAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: agentsys-alerts-topic
+      DisplayName: AgentSys CloudWatch Operational Alerts
+      KmsMasterKeyId: alias/aws/sns
+
+  # Without a subscriber the 7 alarms below would fire into an empty topic. The email
+  # endpoint must confirm the SNS link once; deploy_stack.py forwards ALERT_EMAIL from .env.
+  AgentSysAlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AgentSysAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   IngestErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -459,6 +526,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   ApiErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -476,6 +545,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   IngestFailedMetricAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -490,6 +561,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   IngestDlqAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -507,6 +580,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   IngestLogGroup:
     Type: AWS::Logs::LogGroup
@@ -542,6 +617,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   AggregatorStreamDlqAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -559,6 +636,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
   TranscribeDlqAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -576,6 +655,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AgentSysAlertsTopic
 
 Outputs:
   ApiEndpoint:
@@ -612,3 +693,9 @@ Outputs:
     Value: !Ref AggregatorErrorAlarm
   AggregatorStreamDlqAlarmName:
     Value: !Ref AggregatorStreamDlqAlarm
+  AlertsTopicArn:
+    Description: SNS topic ARN for AgentSys CloudWatch alarms
+    Value: !Ref AgentSysAlertsTopic
+  AlertEmailEndpoint:
+    Description: Email subscribed to the alerts topic (PendingConfirmation until the SNS link is clicked)
+    Value: !If [HasAlertEmail, !Ref AlertEmail, "none (AlertEmail parameter was empty)"]
