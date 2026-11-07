@@ -1,8 +1,0 @@
-{{- $u := .Destination -}}
-{{- if or (strings.HasPrefix $u "http://") (strings.HasPrefix $u "https://") (strings.HasPrefix $u "mailto:") (strings.HasPrefix $u "#") -}}
-<a href="{{ $u | safeURL }}">{{ .Text | safeHTML }}</a>
-{{- else if strings.HasPrefix $u "/" -}}
-<a href="{{ strings.TrimPrefix "/" $u | relURL }}">{{ .Text | safeHTML }}</a>
-{{- else -}}
-<a href="{{ $u | safeURL }}">{{ .Text | safeHTML }}</a>
-{{- end -}}

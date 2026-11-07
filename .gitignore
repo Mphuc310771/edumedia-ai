@@ -41,10 +41,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Hugo internship report
-report/public/
-report/resources/
-report/.hugo_build.lock
 
 sample_data/
 
