@@ -54,18 +54,43 @@ export const OFF_MAJOR_SUBJECTS = new Set([
   "philosophy",
   "pe",
   "off_major",
+  "finance",
+  "accounting",
+  "marketing",
+  "logistics",
+  "management",
+  "medicine",
+  "pharmacy",
+  "nursing",
+  "public_health",
+  "media",
+  "psychology",
+  "mechanical",
+  "electrical",
+  "construction",
+  "pedagogy",
 ])
 
 export function isOffMajorSubject(subject?: string) {
   return Boolean(subject && OFF_MAJOR_SUBJECTS.has(subject))
 }
 
+export type DisciplineId =
+  | "it"
+  | "business"
+  | "healthcare"
+  | "social_law"
+  | "engineering"
+  | "natural_sciences"
+  | "general"
+
 export interface SearchPlan {
   keywords: string[]
   media_type: string | null
   category: string | null
+  subject?: string | null
   rationale: string
-  planner_source?: string
+  planner_source?: "bedrock" | "bedrock_throttled" | "bedrock_rate_limited" | "bedrock_error" | "heuristic" | string
   embedding_source?: string
 }
 
@@ -82,5 +107,6 @@ export interface HealthResponse {
   environment?: string
   ingest_mode?: "sync" | "event"
   components?: Record<string, string>
+  component_errors?: Record<string, string>
   message?: string
 }

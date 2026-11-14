@@ -60,3 +60,8 @@ MAJOR_SUBJECTS = {
     for key, spec in (taxonomy.get("subjects") or {}).items()
     if spec.get("major")
 } | {"lecture"}
+
+SUBJECT_DISCIPLINES = {
+    key: str(spec.get("discipline") or ("it" if spec.get("major") else "general"))
+    for key, spec in (taxonomy.get("subjects") or {}).items()
+}

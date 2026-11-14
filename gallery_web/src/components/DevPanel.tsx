@@ -1,5 +1,5 @@
 import React from "react"
-import { Activity, X } from "lucide-react"
+import { Activity, AlertCircle, X } from "lucide-react"
 import { HealthResponse } from "../types"
 
 const LABELS: Record<string, string> = {
@@ -25,6 +25,7 @@ export const DevPanel: React.FC<{ onClose: () => void; health: HealthResponse | 
   health,
 }) => {
   const components = health?.components || {}
+  const errors = health?.component_errors || {}
 
   return (
     <div
@@ -43,8 +44,8 @@ export const DevPanel: React.FC<{ onClose: () => void; health: HealthResponse | 
               <Activity className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-base font-extrabold text-white">Trạng thái dịch vụ</h3>
-              <p className="text-xs text-slate-500">Ping thật từng service AWS</p>
+              <h3 className="text-base font-extrabold text-white">Trạng thái dịch vụ AWS</h3>
+              <p className="text-xs text-slate-500">Kết nối trực tiếp dịch vụ AWS (Zero-Mock)</p>
             </div>
           </div>
           <button
@@ -60,23 +61,31 @@ export const DevPanel: React.FC<{ onClose: () => void; health: HealthResponse | 
         <div className="mb-4 rounded-2xl surface p-4 text-sm">
           <div className="text-xs font-bold uppercase tracking-wide text-slate-600">Provider / môi trường</div>
           <div className="mt-1.5 font-semibold text-white">
-            {health?.provider || "unknown"} · {health?.environment || "—"} · ingest {health?.ingest_mode || "sync"}
+            {health?.provider || "aws"} · {health?.environment || "development"} · ingest {health?.ingest_mode || "sync"}
           </div>
-          {health?.message ? <p className="mt-2 leading-relaxed text-slate-400">{health.message}</p> : null}
+          {health?.message ? <p className="mt-2 text-xs leading-relaxed text-slate-400">{health.message}</p> : null}
         </div>
 
-        <div className="space-y-1.5 overflow-y-auto">
-          {Object.entries(components).map(([key, value]) => (
-            <div
-              key={key}
-              className="flex items-center justify-between rounded-xl surface px-3.5 py-2.5"
-            >
-              <span className="text-sm font-medium text-slate-200">{LABELS[key] || key}</span>
-              <span className={`rounded-lg px-2 py-0.5 font-mono text-xs font-semibold ${statusClass(value)}`}>
-                {value}
-              </span>
-            </div>
-          ))}
+        <div className="space-y-2 overflow-y-auto">
+          {Object.entries(components).map(([key, value]) => {
+            const err = errors[key]
+            return (
+              <div key={key} className="rounded-xl surface p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-200">{LABELS[key] || key}</span>
+                  <span className={`rounded-lg px-2 py-0.5 font-mono text-xs font-semibold ${statusClass(value)}`}>
+                    {value}
+                  </span>
+                </div>
+                {err && (
+                  <div className="flex items-start gap-1.5 rounded-lg border border-rose-500/25 bg-rose-500/10 p-2 text-xs text-rose-300">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-rose-400" />
+                    <span className="font-mono break-all">{err}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

@@ -1,13 +1,7 @@
-import React from "react"
-import { ChevronRight, GraduationCap, LogOut, X } from "lucide-react"
-import {
-  CATEGORIES,
-  MAJOR_SUBJECTS,
-  OFF_MAJOR_SUBJECT_LIST,
-  OFF_MAJOR_UMBRELLA,
-  SubjectMeta,
-} from "../catalog"
-import { HealthResponse, isOffMajorSubject, MediaItem, SmartCategory } from "../types"
+import React, { useState } from "react"
+import { ChevronDown, ChevronRight, GraduationCap, LogOut, X } from "lucide-react"
+import { CATEGORIES, DISCIPLINES, SubjectMeta } from "../catalog"
+import { DisciplineId, HealthResponse, MediaItem, SmartCategory } from "../types"
 
 interface SidebarProps {
   open: boolean
@@ -22,6 +16,8 @@ interface SidebarProps {
   onLogout?: () => void
 }
 
+type AccentTone = "violet" | "sky" | "amber" | "emerald" | "rose" | "teal"
+
 function NavItem({
   Icon,
   label,
@@ -34,7 +30,7 @@ function NavItem({
   label: string
   count?: number
   active: boolean
-  accent?: "violet" | "sky" | "amber"
+  accent?: AccentTone
   onClick: () => void
 }) {
   const activeClass =
@@ -42,7 +38,13 @@ function NavItem({
       ? "bg-sky-500/[0.12] text-sky-200 border-sky-400/20"
       : accent === "amber"
         ? "bg-amber-500/[0.12] text-amber-200 border-amber-400/20"
-        : "bg-violet-500/[0.14] text-violet-100 border-violet-400/25"
+        : accent === "emerald"
+          ? "bg-emerald-500/[0.12] text-emerald-200 border-emerald-400/20"
+          : accent === "rose"
+            ? "bg-rose-500/[0.12] text-rose-200 border-rose-400/20"
+            : accent === "teal"
+              ? "bg-teal-500/[0.12] text-teal-200 border-teal-400/20"
+              : "bg-violet-500/[0.14] text-violet-100 border-violet-400/25"
 
   return (
     <button
@@ -77,6 +79,26 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
+function disciplineAccent(id: DisciplineId): AccentTone {
+  switch (id) {
+    case "it":
+      return "sky"
+    case "business":
+      return "emerald"
+    case "healthcare":
+      return "rose"
+    case "social_law":
+      return "violet"
+    case "engineering":
+      return "amber"
+    case "natural_sciences":
+      return "teal"
+    case "general":
+    default:
+      return "amber"
+  }
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({
   open,
   onClose,
@@ -89,18 +111,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenStatus,
   onLogout,
 }) => {
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    it: true,
+    business: true,
+  })
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
+
   const categoryCount = (key: SmartCategory) =>
     key === "all" ? items.length : items.filter((item) => item.category === key).length
   const subjectCount = (key: string) => items.filter((item) => item.subject === key).length
-  const offMajorCount = items.filter((item) => isOffMajorSubject(item.subject)).length
-  const visibleOffMajor = OFF_MAJOR_SUBJECT_LIST.filter((meta) => subjectCount(meta.key) > 0)
 
   const degraded = health?.status === "DEGRADED"
   const offline = !health || health.status === "OFFLINE"
   const statusTone = offline ? "bg-rose-400" : degraded ? "bg-amber-400" : "bg-emerald-400"
   const statusText = offline ? "Mất kết nối API" : degraded ? "AWS thiếu dịch vụ" : "AWS hoạt động tốt"
 
-  const subjectItem = (meta: SubjectMeta, accent: "sky" | "amber") => (
+  const subjectItem = (meta: SubjectMeta, accent: AccentTone) => (
     <NavItem
       key={meta.key}
       Icon={meta.Icon}
@@ -147,21 +176,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ))}
         </div>
 
-        <SectionLabel>Môn ngành CNTT</SectionLabel>
-        <div className="space-y-0.5">{MAJOR_SUBJECTS.map((meta) => subjectItem(meta, "sky"))}</div>
+        <SectionLabel>Khối ngành Đào tạo</SectionLabel>
+        {DISCIPLINES.map((discipline) => {
+          const totalInDiscipline = discipline.subjects.reduce(
+            (sum, s) => sum + subjectCount(s.key),
+            0,
+          )
+          const isExpanded =
+            openSections[discipline.id] ??
+            (totalInDiscipline > 0 ||
+              discipline.id === "it" ||
+              discipline.id === "business" ||
+              discipline.subjects.some((s) => s.key === activeSubject))
 
-        <SectionLabel>Ngoài ngành</SectionLabel>
-        <div className="space-y-0.5">
-          <NavItem
-            Icon={OFF_MAJOR_UMBRELLA.Icon}
-            label="Tất cả ngoài ngành"
-            count={offMajorCount}
-            active={activeSubject === "off_major"}
-            accent="amber"
-            onClick={() => onSelectSubject(activeSubject === "off_major" ? "all" : "off_major")}
-          />
-          {visibleOffMajor.map((meta) => subjectItem(meta, "amber"))}
-        </div>
+          return (
+            <div key={discipline.id} className="mt-3">
+              <button
+                type="button"
+                onClick={() => toggleSection(discipline.id)}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 transition"
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <discipline.Icon className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">{discipline.label}</span>
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {totalInDiscipline > 0 && (
+                    <span className="rounded-md bg-white/[0.08] px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
+                      {totalInDiscipline}
+                    </span>
+                  )}
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 text-slate-500 transition-transform duration-200 ${
+                      isExpanded ? "rotate-180" : ""
+                    }`}
+                  />
+                </div>
+              </button>
+              {isExpanded && (
+                <div className="space-y-0.5 mt-1 pl-1">
+                  {discipline.subjects.map((meta) =>
+                    subjectItem(meta, disciplineAccent(discipline.id)),
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       <div className="border-t border-white/[0.06] p-3">

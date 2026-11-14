@@ -26,7 +26,7 @@ _BEDROCK_QUOTA_COOLDOWN_SECONDS = 6 * 3600
 _BEDROCK_RATE_COOLDOWN_SECONDS = 45
 
 
-def _heuristic_search_plan(user_query: str, rationale: str) -> SearchPlan:
+def _heuristic_search_plan(user_query: str, rationale: str, source: str = "heuristic") -> SearchPlan:
     from apps.domain import infer_subject
 
     words = [w.strip() for w in re.findall(r"[\wÀ-ỹ]+", user_query) if len(w.strip()) > 1]
@@ -36,7 +36,7 @@ def _heuristic_search_plan(user_query: str, rationale: str) -> SearchPlan:
         subject=None if subject == "none" else subject,
         category="study" if subject not in {"none", None} else None,
         rationale=rationale,
-        planner_source="heuristic",
+        planner_source=source,
     )
 
 
@@ -411,11 +411,12 @@ class TranscribeSpeech:
             if code in {"ConflictException", "Conflict"}:
                 logger.info("Reuse existing Transcribe job %s", job_name)
                 return job_name
+            message = exc.response.get("Error", {}).get("Message", str(exc))
             logger.warning("Transcribe start_job failed (%s): %s", code, exc)
-            return None
+            raise RuntimeError(f"Amazon Transcribe lỗi ({code}): {message}") from exc
         except Exception as exc:
             logger.warning("Transcribe start_job error: %s", exc)
-            return None
+            raise RuntimeError(f"Amazon Transcribe start_job thất bại: {exc}") from exc
 
     def read_job_payload(self, job_name: str) -> dict:
         job = self.client.get_transcription_job(TranscriptionJobName=job_name)
@@ -555,12 +556,14 @@ class BedrockPlanner:
         if _bedrock_quota_blocked():
             return _heuristic_search_plan(
                 user_query,
-                "Bedrock hết hạn mức token trong ngày — đang tìm theo từ khóa. Thử lại sau vài giờ hoặc ngày mai.",
+                "Bedrock tạm hết hạn mức token trong ngày (AWS ThrottlingException) — đang tìm kiếm từ khóa thực tế.",
+                source="bedrock_throttled",
             )
         if _bedrock_rate_blocked():
             return _heuristic_search_plan(
                 user_query,
-                "Bedrock đang bị giới hạn tốc độ — tìm theo từ khóa trong khoảng 1 phút.",
+                "Bedrock đang bị giới hạn tốc độ (AWS RateLimit) — đang tìm kiếm từ khóa trong khoảng 1 phút.",
+                source="bedrock_rate_limited",
             )
         system = (
             "You are the Intelligent Query Planner and Keyword Enrichment Engine for AgentSys, a Serverless Multimodal Search System on AWS.\n"
@@ -572,7 +575,7 @@ class BedrockPlanner:
             '  "keywords": ["list", "of", "expanded", "synonyms", "in", "Vietnamese", "and", "English"],\n'
             '  "media_type": "image" | "audio" | "video" | null,\n'
             '  "category": "study" | "pets" | "food" | "receipts" | "scenes" | "videos" | "other" | null,\n'
-            '  "subject": "math" | "os" | "networks" | "programming" | "database" | "cloud" | "lecture" | "english" | "physics" | "chemistry" | "biology" | "economics" | "law" | "philosophy" | "pe" | "off_major" | null,\n'
+            '  "subject": "math" | "os" | "networks" | "programming" | "database" | "cloud" | "security" | "software_eng" | "ai_ml" | "finance" | "accounting" | "marketing" | "logistics" | "management" | "medicine" | "pharmacy" | "nursing" | "public_health" | "media" | "psychology" | "mechanical" | "electrical" | "construction" | "pedagogy" | "lecture" | "english" | "physics" | "chemistry" | "biology" | "economics" | "law" | "philosophy" | "pe" | "off_major" | null,\n'
             '  "rationale": "Brief rationale in Vietnamese explaining the chosen filters and keyword expansion."\n'
             "}\n\n"
             "RULES FOR KEYWORD ENRICHMENT & MODALITY INFERENCE:\n"
@@ -585,8 +588,9 @@ class BedrockPlanner:
             '   - Example "thầy dặn thi" -> ["dặn thi", "ôn thi", "cuối kỳ", "kiểm tra", "nội dung thi", "exam", "test", "final exam"]\n'
             '   - Example "ảnh chụp bảng môn mạng" -> ["mạng máy tính", "computer network", "packet", "IP", "TCP", "OSI", "router", "Whiteboard", "Classroom"]\n'
             '   - Example "hóa đơn cafe" -> ["hóa đơn", "tiền", "thanh toán", "cà phê", "receipt", "bill", "invoice", "coffee"]\n'
+            '   - Example "tài chính chứng khoán" -> ["tài chính", "chứng khoán", "cổ phiếu", "lãi suất", "finance", "stock", "banking"]\n'
+            '   - Example "giải phẫu y khoa" -> ["y khoa", "giải phẫu", "bệnh học", "medicine", "anatomy", "lâm sàng"]\n'
             "3. Map subject and category accurately:\n"
-            '   - Non-CS courses -> subject: "off_major"\n'
             '   - General lecture whiteboard -> category: "study", subject: "lecture"\n'
             "   - If the query is not related to study/courses -> subject: null\n\n"
             "FEW-SHOT EXAMPLES:\n"
@@ -630,16 +634,22 @@ class BedrockPlanner:
                 _mark_bedrock_daily_quota()
                 return _heuristic_search_plan(
                     user_query,
-                    "Bedrock hết hạn mức token trong ngày — đang tìm theo từ khóa. Thử lại sau vài giờ hoặc ngày mai.",
+                    "Bedrock hết hạn mức token trong ngày (AWS ThrottlingException) — đang tìm theo từ khóa.",
+                    source="bedrock_throttled",
                 )
             if _is_rate_throttle(exc):
                 _mark_bedrock_rate_limit()
                 return _heuristic_search_plan(
                     user_query,
-                    "Bedrock đang bị giới hạn tốc độ — tìm theo từ khóa trong khoảng 1 phút.",
+                    "Bedrock đang bị giới hạn tốc độ (AWS RateLimit) — đang tìm theo từ khóa trong khoảng 1 phút.",
+                    source="bedrock_rate_limited",
                 )
-            logger.warning("Bedrock plan error: %s. Using heuristic fallback.", exc)
-            return _heuristic_search_plan(user_query, "Bedrock unavailable — keyword fallback")
+            logger.warning("Bedrock plan error: %s. Using keyword fallback.", exc)
+            return _heuristic_search_plan(
+                user_query,
+                f"Lỗi AWS Bedrock ({exc.__class__.__name__}): {exc} — tìm theo từ khóa.",
+                source="bedrock_error",
+            )
 
     def synthesize_answer(self, user_query: str, hits: list) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Synthesize a direct answer and evidence snippet from top search hits."""

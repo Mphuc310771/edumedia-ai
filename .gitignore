@@ -44,3 +44,11 @@ Thumbs.db
 
 sample_data/
 
+# Local utilities & launchers (kept on local disk, excluded from GitHub)
+start_app.bat
+*.bat
+scripts/generate_architecture_drawio.py
+scripts/bootstrap_aws.py
+scripts/reprocess_audio.py
+scripts/setup_cloudwatch_alarms.py
+

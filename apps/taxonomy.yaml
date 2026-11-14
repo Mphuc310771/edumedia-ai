@@ -457,6 +457,216 @@ subjects:
       - {term: kỹ năng mềm, weight: 8}
       - {term: đại cương, weight: 6}
       - {term: môn phụ, weight: 7}
+  finance:
+    label: "Tài chính - Ngân hàng"
+    discipline: "business"
+    description: "tài chính ngân hàng chứng khoán cổ phiếu lãi suất tín dụng trái phiếu đầu tư fintech"
+    keywords:
+      - {term: tài chính, weight: 9}
+      - {term: finance, weight: 8}
+      - {term: ngân hàng, weight: 8}
+      - {term: banking, weight: 8}
+      - {term: chứng khoán, weight: 9}
+      - {term: cổ phiếu, weight: 9}
+      - {term: trái phiếu, weight: 8}
+      - {term: lãi suất, weight: 8}
+      - {term: tín dụng, weight: 8}
+      - {term: đầu tư tài chính, weight: 9}
+      - {term: fintech, weight: 8}
+  accounting:
+    label: "Kế toán - Kiểm toán"
+    discipline: "business"
+    description: "kế toán kiểm toán bảng cân đối kế toán định khoản nợ có tài sản báo cáo tài chính vat thuế"
+    keywords:
+      - {term: kế toán, weight: 9}
+      - {term: accounting, weight: 8}
+      - {term: kiểm toán, weight: 9}
+      - {term: auditing, weight: 8}
+      - {term: bảng cân đối kế toán, weight: 9}
+      - {term: định khoản, weight: 9}
+      - {term: nợ có, weight: 8}
+      - {term: báo cáo tài chính, weight: 9}
+      - {term: tài sản cố định, weight: 8}
+      - {term: nợ phải trả, weight: 8}
+      - {term: thuế giá trị gia tăng, weight: 8}
+  marketing:
+    label: "Marketing & Truyền thông số"
+    discipline: "business"
+    description: "marketing tiếp thị branding truyền thông thương hiệu quảng cáo seo pr thị trường digital marketing"
+    keywords:
+      - {term: marketing, weight: 9}
+      - {term: tiếp thị, weight: 8}
+      - {term: digital marketing, weight: 9}
+      - {term: thương hiệu, weight: 8}
+      - {term: branding, weight: 8}
+      - {term: quảng cáo, weight: 8}
+      - {term: seo, weight: 8}
+      - {term: pr, weight: 7}
+      - {term: nghiên cứu thị trường, weight: 8}
+      - {term: khách hàng mục tiêu, weight: 8}
+  logistics:
+    label: "Logistics & Chuỗi cung ứng"
+    discipline: "business"
+    description: "logistics chuỗi cung ứng supply chain kho bãi xuất nhập khẩu hải quan incoterms container vận tải"
+    keywords:
+      - {term: logistics, weight: 9}
+      - {term: chuỗi cung ứng, weight: 9}
+      - {term: supply chain, weight: 9}
+      - {term: kho bãi, weight: 8}
+      - {term: xuất nhập khẩu, weight: 9}
+      - {term: hải quan, weight: 8}
+      - {term: incoterms, weight: 9}
+      - {term: container, weight: 7}
+      - {term: vận tải hàng hóa, weight: 8}
+      - {term: cảng biển, weight: 7}
+  management:
+    label: "Quản trị kinh doanh"
+    discipline: "business"
+    description: "quản trị kinh doanh quản trị nhân sự hrm chiến lược kinh doanh startup khởi nghiệp kpi"
+    keywords:
+      - {term: quản trị kinh doanh, weight: 9}
+      - {term: business administration, weight: 9}
+      - {term: quản trị nhân sự, weight: 9}
+      - {term: hrm, weight: 8}
+      - {term: chiến lược kinh doanh, weight: 8}
+      - {term: startup, weight: 7}
+      - {term: khởi nghiệp, weight: 7}
+      - {term: kpi, weight: 7}
+      - {term: okr, weight: 7}
+  medicine:
+    label: "Y đa khoa & Bệnh học"
+    discipline: "healthcare"
+    description: "y khoa y đa khoa giải phẫu sinh lý bệnh chẩn đoán điều trị lâm sàng bệnh án nội khoa ngoại khoa"
+    keywords:
+      - {term: y khoa, weight: 9}
+      - {term: y đa khoa, weight: 9}
+      - {term: medicine, weight: 8}
+      - {term: giải phẫu, weight: 9}
+      - {term: anatomy, weight: 8}
+      - {term: sinh lý bệnh, weight: 9}
+      - {term: chẩn đoán, weight: 8}
+      - {term: điều trị, weight: 8}
+      - {term: lâm sàng, weight: 8}
+      - {term: bệnh án, weight: 8}
+      - {term: nội khoa, weight: 8}
+      - {term: ngoại khoa, weight: 8}
+  pharmacy:
+    label: "Dược học & Dược lý"
+    discipline: "healthcare"
+    description: "dược học dược lý thuốc kháng sinh liều dùng biệt dược tương tác thuốc đơn thuốc dược lâm sàng"
+    keywords:
+      - {term: dược học, weight: 9}
+      - {term: pharmacy, weight: 8}
+      - {term: dược lý, weight: 9}
+      - {term: pharmacology, weight: 8}
+      - {term: thuốc kháng sinh, weight: 9}
+      - {term: dược lâm sàng, weight: 8}
+      - {term: liều dùng, weight: 8}
+      - {term: biệt dược, weight: 8}
+      - {term: tương tác thuốc, weight: 8}
+      - {term: đơn thuốc, weight: 7}
+  nursing:
+    label: "Điều dưỡng & Chăm sóc"
+    discipline: "healthcare"
+    description: "điều dưỡng chăm sóc bệnh nhân sinh hiệu tiêm truyền y tá vô khuẩn hồi sức sơ cứu"
+    keywords:
+      - {term: điều dưỡng, weight: 9}
+      - {term: nursing, weight: 8}
+      - {term: chăm sóc bệnh nhân, weight: 9}
+      - {term: sinh hiệu, weight: 8}
+      - {term: tiêm truyền, weight: 8}
+      - {term: huyết áp, weight: 7}
+      - {term: y tá, weight: 7}
+      - {term: vô khuẩn, weight: 8}
+  public_health:
+    label: "Y tế công cộng & Dinh dưỡng"
+    discipline: "healthcare"
+    description: "y tế công cộng vệ sinh dịch tễ dịch bệnh vắc xin vaccine dinh dưỡng sức khỏe cộng đồng"
+    keywords:
+      - {term: y tế công cộng, weight: 9}
+      - {term: public health, weight: 9}
+      - {term: vệ sinh dịch tễ, weight: 9}
+      - {term: dịch tễ học, weight: 9}
+      - {term: vắc xin, weight: 8}
+      - {term: vaccine, weight: 8}
+      - {term: dinh dưỡng học, weight: 8}
+      - {term: sức khỏe cộng đồng, weight: 8}
+  media:
+    label: "Báo chí & Truyền thông"
+    discipline: "social_law"
+    description: "báo chí truyền thông phóng sự toà soạn tin tức phát thanh truyền hình xuất bản phỏng vấn"
+    keywords:
+      - {term: báo chí, weight: 9}
+      - {term: journalism, weight: 8}
+      - {term: phóng sự, weight: 9}
+      - {term: truyền hình, weight: 8}
+      - {term: phát thanh, weight: 7}
+      - {term: tin tức, weight: 7}
+      - {term: tòa soạn, weight: 8}
+      - {term: biên tập tin bài, weight: 8}
+  psychology:
+    label: "Tâm lý học & Xã hội"
+    discipline: "social_law"
+    description: "tâm lý học hành vi tư vấn tâm lý nhận thức cảm xúc xã hội học trị liệu tâm lý"
+    keywords:
+      - {term: tâm lý học, weight: 9}
+      - {term: psychology, weight: 8}
+      - {term: tư vấn tâm lý, weight: 9}
+      - {term: hành vi con người, weight: 8}
+      - {term: cảm xúc, weight: 7}
+      - {term: nhận thức, weight: 7}
+      - {term: xã hội học, weight: 8}
+  mechanical:
+    label: "Kỹ thuật Cơ khí"
+    discipline: "engineering"
+    description: "kỹ thuật cơ khí chế tạo máy chi tiết máy autocad solidworks sức bền vật liệu tiện phay dung sai"
+    keywords:
+      - {term: kỹ thuật cơ khí, weight: 9}
+      - {term: cơ khí chế tạo, weight: 9}
+      - {term: mechanical engineering, weight: 9}
+      - {term: chi tiết máy, weight: 8}
+      - {term: nguyên lý máy, weight: 8}
+      - {term: autocad, weight: 8}
+      - {term: solidworks, weight: 8}
+      - {term: sức bền vật liệu, weight: 8}
+      - {term: gia công cơ khí, weight: 8}
+  electrical:
+    label: "Kỹ thuật Điện - Điện tử"
+    discipline: "engineering"
+    description: "kỹ thuật điện điện tử mạch điện xoay chiều bán dẫn vi mạch pcb điện tử công suất linh kiện"
+    keywords:
+      - {term: kỹ thuật điện, weight: 9}
+      - {term: điện tử, weight: 8}
+      - {term: electrical engineering, weight: 9}
+      - {term: mạch điện tử, weight: 8}
+      - {term: bán dẫn, weight: 8}
+      - {term: vi mạch, weight: 8}
+      - {term: pcb, weight: 8}
+      - {term: điện tử công suất, weight: 8}
+  construction:
+    label: "Kỹ thuật Xây dựng & Kiến trúc"
+    discipline: "engineering"
+    description: "kỹ thuật xây dựng kiến trúc bê tông cốt thép kết cấu công trình trắc địa thi công dự toán"
+    keywords:
+      - {term: kỹ thuật xây dựng, weight: 9}
+      - {term: civil engineering, weight: 9}
+      - {term: kiến trúc, weight: 8}
+      - {term: bê tông cốt thép, weight: 9}
+      - {term: kết cấu công trình, weight: 8}
+      - {term: trắc địa, weight: 8}
+      - {term: thi công xây dựng, weight: 8}
+  pedagogy:
+    label: "Sư phạm & Khoa học giáo dục"
+    discipline: "natural_sciences"
+    description: "sư phạm giáo dục học phương pháp giảng dạy tâm lý sư phạm giáo án quản lý lớp học dạy học tích cực"
+    keywords:
+      - {term: sư phạm, weight: 9}
+      - {term: pedagogy, weight: 8}
+      - {term: giáo dục học, weight: 9}
+      - {term: phương pháp giảng dạy, weight: 9}
+      - {term: tâm lý sư phạm, weight: 8}
+      - {term: giáo án, weight: 8}
+      - {term: dạy học tích cực, weight: 8}
 
 lecture_hints:
   - whiteboard

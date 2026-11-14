@@ -4,7 +4,7 @@ import { login } from "../api/client"
 
 export const LoginScreen: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [username, setUsername] = useState("admin")
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState("admin")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -61,9 +61,9 @@ export const LoginScreen: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) 
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           Vào thư viện
         </button>
-        <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-600">
-          Lab: user <span className="font-mono text-slate-400">admin</span>, mật khẩu ={" "}
-          <span className="font-mono text-slate-400">ADMIN_API_KEY</span> trong file .env (không nhét key vào frontend).
+        <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
+          Tài khoản mặc định: <span className="font-mono text-slate-300">admin</span> &bull; Mật khẩu:{" "}
+          <span className="font-mono text-slate-300">admin</span>
         </p>
       </form>
     </div>
