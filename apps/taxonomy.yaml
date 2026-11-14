@@ -199,6 +199,10 @@ subjects:
       - {term: calculus, weight: 7}
       - {term: algebra, weight: 6}
       - {term: equation, weight: 5}
+      - {term: mathematical equation, weight: 9}
+      - {term: sin, weight: 6}
+      - {term: cos, weight: 6}
+      - {term: tan, weight: 6}
       - {term: ma trận, weight: 7}
       - {term: quy hoạch tuyến tính, weight: 8}
       - {term: qhtt, weight: 7}
@@ -536,10 +540,14 @@ subjects:
   medicine:
     label: "Y đa khoa & Bệnh học"
     discipline: "healthcare"
-    description: "y khoa y đa khoa giải phẫu sinh lý bệnh chẩn đoán điều trị lâm sàng bệnh án nội khoa ngoại khoa"
+    description: "y khoa y đa khoa giải phẫu sinh lý bệnh chẩn đoán điều trị lâm sàng bệnh án nội khoa ngoại khoa bác sĩ y dược"
     keywords:
       - {term: y khoa, weight: 9}
       - {term: y đa khoa, weight: 9}
+      - {term: y dược, weight: 9}
+      - {term: bác sĩ, weight: 9}
+      - {term: bác sĩ đa khoa, weight: 10}
+      - {term: khóa luận tốt nghiệp, weight: 7}
       - {term: medicine, weight: 8}
       - {term: giải phẫu, weight: 9}
       - {term: anatomy, weight: 8}
