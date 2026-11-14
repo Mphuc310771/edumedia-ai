@@ -1,7 +1,8 @@
-from __future__ import annotations
-
+import logging
+import os
+import re
 from functools import lru_cache
-from typing import Iterable, List, Sequence
+from typing import Any, Iterable, List, Optional, Sequence
 
 from apps.classify.flash_engine import WeightedKeywordIndex
 from apps.classify.text import fold_text
@@ -10,10 +11,14 @@ from apps.classify.taxonomy import (
     CATEGORY_KEYWORDS,
     LECTURE_CONTEXT_HINTS,
     OCR_NOISE_BRANDS,
+    SUBJECT_DESCRIPTIONS,
     SUBJECT_KEYWORDS,
+    SUBJECT_LABELS,
     THRESHOLDS,
 )
 from apps.search.vector_engine import cosine_similarity, get_titan_embedding_with_source
+
+logger = logging.getLogger(__name__)
 
 CATEGORY_LOCK = int(THRESHOLDS.get("category_lock", 12))
 CATEGORY_MIN = int(THRESHOLDS.get("category_min", 4))
@@ -224,6 +229,54 @@ def infer_category(media_type: str, labels: Sequence[str] | None, text: str | No
     return "other"
 
 
+def _classify_subject_with_bedrock(
+    full_text: str,
+    bedrock_client: Any,
+    model_id: str = "amazon.nova-lite-v1:0",
+) -> Optional[str]:
+    """Classify academic subject using Amazon Bedrock semantic comprehension."""
+    if not full_text or len(full_text.strip()) < 10 or bedrock_client is None:
+        return None
+
+    snippet = full_text[:1500].strip()
+    valid_keys = [k for k in SUBJECT_DESCRIPTIONS.keys() if k not in {"none", "lecture"}]
+    subjects_summary = "\n".join(
+        f"- {key}: {SUBJECT_LABELS.get(key, key)} ({SUBJECT_DESCRIPTIONS.get(key, '')[:80]})"
+        for key in valid_keys
+    )
+
+    system_prompt = (
+        "Bạn là chuyên gia phân loại tài liệu học thuật đại học Việt Nam cho AgentSys.\n"
+        "Nhiệm vụ: Đọc văn bản học liệu (hoặc kết quả OCR/nhãn nhận diện) và xác định chính xác chuyên ngành đào tạo phù hợp nhất.\n"
+        "Quy tắc tuyệt đối:\n"
+        "1. CHỈ trả về đúng 1 mã môn học (subject key) từ danh sách dưới đây, không viết thêm bất kỳ từ nào khác.\n"
+        "2. Nếu tài liệu không thuộc môn học nào (ví dụ ảnh đời sống, thú cưng, hóa đơn mua sắm, cảnh quan), trả về: none\n\n"
+        f"Danh sách môn học hợp lệ:\n{subjects_summary}"
+    )
+
+    user_prompt = f"Phân tích tài liệu sau và trả về mã môn học duy nhất:\n\n{snippet}"
+
+    try:
+        response = bedrock_client.converse(
+            modelId=model_id,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": 20, "temperature": 0},
+        )
+        output_text = response["output"]["message"]["content"][0]["text"].strip().lower()
+        cleaned = re.sub(r"[^a-z0-9_]", "", output_text)
+        if cleaned in valid_keys:
+            return cleaned
+        for key in valid_keys:
+            if key in output_text:
+                return key
+        if cleaned == "none":
+            return "none"
+    except Exception as exc:
+        logger.warning("Bedrock subject classification skipped (%s), falling back to heuristics.", exc)
+    return None
+
+
 def infer_subject(
     labels: Sequence[str] | None,
     ocr_text: str | None = "",
@@ -231,10 +284,18 @@ def infer_subject(
     filename: str | None = "",
     bedrock_client=None,
 ) -> str:
-    _ = bedrock_client
     full_text = " ".join([*(labels or []), ocr_text or "", transcript or "", filename or ""])
     if not fold_text(full_text).strip():
         return "none"
+
+    # Tier 1: Bedrock Semantic AI Classification (if client available)
+    if bedrock_client is not None:
+        model_id = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+        bedrock_subject = _classify_subject_with_bedrock(full_text, bedrock_client, model_id=model_id)
+        if bedrock_subject is not None:
+            return bedrock_subject
+
+    # Tier 2: FlashText Keyword Index Fallback
     best, score = subject_index().best("", full_text)
     if best and score >= SUBJECT_MIN:
         return best

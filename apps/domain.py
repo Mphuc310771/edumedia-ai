@@ -241,11 +241,11 @@ def has_lecture_context(record: MediaRecord) -> bool:
 def resolve_subject(record: MediaRecord) -> str:
     """Resolve and normalize the academic subject for a media record with fallback heuristics."""
     current = (record.subject or "none").strip()
+    if current not in {"", "none", "lecture"}:
+        return current
     guessed = infer_subject(record.labels, record.ocr_text, record.transcript, record.filename)
     if guessed != "none":
         return guessed
-    if current not in {"", "none", "lecture"}:
-        return current
     if record.media_type == "audio" or has_lecture_context(record):
         return "lecture"
     return "none"
