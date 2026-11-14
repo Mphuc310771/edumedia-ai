@@ -1,6 +1,7 @@
 import React, { FormEvent, useState } from "react"
-import { GraduationCap, Loader2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import { login } from "../api/client"
+import { BrandLogo } from "./BrandLogo"
 
 export const LoginScreen: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [username, setUsername] = useState("admin")
@@ -28,14 +29,8 @@ export const LoginScreen: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) 
         onSubmit={(event) => void onSubmit(event)}
         className="w-full max-w-sm rounded-3xl border border-white/[0.08] bg-ink-900/80 p-8 shadow-pop backdrop-blur-xl"
       >
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-sky-400">
-            <GraduationCap className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-extrabold text-white">AgentSys</h1>
-            <p className="text-xs text-slate-500">Đăng nhập thư viện học liệu</p>
-          </div>
+        <div className="mb-6">
+          <BrandLogo size="lg" subtitle="Đăng nhập thư viện học liệu" />
         </div>
         <label className="mb-3 block text-xs font-semibold uppercase tracking-wide text-slate-500">
           Tài khoản

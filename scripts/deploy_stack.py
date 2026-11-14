@@ -74,11 +74,12 @@ def _stage_pack() -> None:
 
 
 def _write_samconfig(api_key: str, alert_email: str = "", frontend_origin: str = "*") -> None:
-    overrides = f"ApiKey={api_key}"
+    params = [f'    "ApiKey={api_key}",']
     if alert_email:
-        overrides += f" AlertEmail={alert_email}"
+        params.append(f'    "AlertEmail={alert_email}",')
     if frontend_origin:
-        overrides += f" FrontendOriginUrl={frontend_origin}"
+        params.append(f'    "FrontendOriginUrl={frontend_origin}",')
+
     SAMCONFIG.write_text(
         "\n".join(
             [
@@ -90,7 +91,9 @@ def _write_samconfig(api_key: str, alert_email: str = "", frontend_origin: str =
                 "resolve_s3 = true",
                 "confirm_changeset = false",
                 "fail_on_empty_changeset = false",
-                f'parameter_overrides = "{overrides}"',
+                "parameter_overrides = [",
+                *params,
+                "]",
                 "",
             ]
         ),

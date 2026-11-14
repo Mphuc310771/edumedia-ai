@@ -1,7 +1,8 @@
 import React, { useState } from "react"
-import { ChevronDown, ChevronRight, GraduationCap, LogOut, X } from "lucide-react"
+import { ChevronDown, ChevronRight, LogOut, X } from "lucide-react"
 import { CATEGORIES, DISCIPLINES, SubjectMeta } from "../catalog"
 import { DisciplineId, HealthResponse, MediaItem, SmartCategory } from "../types"
+import { BrandLogo } from "./BrandLogo"
 
 interface SidebarProps {
   open: boolean
@@ -144,13 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const content = (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 px-4 pb-2 pt-5">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-sky-400 shadow-glow">
-          <GraduationCap className="h-5 w-5 text-white" />
-        </div>
-        <div className="min-w-0 leading-tight">
-          <div className="text-[15px] font-extrabold tracking-tight text-white">AgentSys</div>
-          <div className="truncate text-xs text-slate-500">Thư viện học liệu AI</div>
-        </div>
+        <BrandLogo size="md" subtitle="Học liệu AI Đa phương thức" />
         <button
           type="button"
           onClick={onClose}
