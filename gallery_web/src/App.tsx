@@ -446,7 +446,7 @@ export default function App() {
         </main>
 
         <footer className="border-t border-white/[0.05] py-4 text-center text-xs text-slate-600">
-          AgentSys · First Cloud AI Journey · AWS Serverless
+          EduMedia AI · First Cloud AI Journey · AWS Serverless
         </footer>
       </div>
 

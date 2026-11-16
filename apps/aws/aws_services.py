@@ -797,9 +797,13 @@ def ping_aws(ttl_seconds: float = 0) -> dict:
     mark("rekognition", lambda: _client("rekognition").list_collections(MaxResults=1))
     mark("transcribe", lambda: _client("transcribe").list_transcription_jobs(MaxResults=1))
     region = settings.BEDROCK_REGION or settings.AWS_REGION
-    mark("bedrock", lambda: _client("bedrock", region=region).get_foundation_model(
-        modelIdentifier=settings.BEDROCK_MODEL_ID,
-    ))
+    bedrock_client = _client("bedrock", region=region)
+    model_id = settings.BEDROCK_MODEL_ID
+    if model_id.startswith(("us.", "eu.", "apac.", "cr-")):
+        mark("bedrock", lambda: bedrock_client.get_inference_profile(inferenceProfileIdentifier=model_id))
+    else:
+        mark("bedrock", lambda: bedrock_client.get_foundation_model(modelIdentifier=model_id))
+
     payload = {"status": status, "errors": errors}
     _PING_CACHE["at"] = now
     _PING_CACHE["payload"] = payload

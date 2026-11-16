@@ -145,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const content = (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 px-4 pb-2 pt-5">
-        <BrandLogo size="md" subtitle="Học liệu AI Đa phương thức" />
+        <BrandLogo size="md" subtitle="Smart Media Hub" />
         <button
           type="button"
           onClick={onClose}

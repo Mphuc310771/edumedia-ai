@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Coins,
   Copy,
   Database,
   Download,
@@ -437,8 +436,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     : "border-transparent text-slate-500 hover:text-white"
                 }`}
               >
-                {tab === "content" ? <Sparkles className="h-3.5 w-3.5" /> : <Coins className="h-3.5 w-3.5" />}
-                {tab === "content" ? "Nội dung" : "Chi phí AWS"}
+                {tab === "content" ? <Sparkles className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
+                {tab === "content" ? "Nội dung" : "Thông số kỹ thuật"}
               </button>
             ))}
           </div>
@@ -630,156 +629,68 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
             {activeTab === "tech" && (
               <div className="space-y-4">
-                {/* Thẻ tổng chi phí ước tính */}
-                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                        Ước tính chi phí xử lý {item.type === "image" ? "ảnh" : item.type === "video" ? "video" : "ghi âm"}
-                      </div>
-                      <div className="mt-1 flex items-baseline gap-2">
-                        <span className="text-2xl font-black text-white">
-                          {item.type === "image"
-                            ? "~$0.00207"
-                            : item.type === "video"
-                              ? "~$0.02435"
-                              : "~$0.02413"}
-                        </span>
-                        <span className="text-xs font-medium text-emerald-300/80">
-                          USD / {item.type === "image" ? "ảnh" : "phút"} (
-                          {item.type === "image"
-                            ? "≈ 52 VNĐ"
-                            : item.type === "video"
-                              ? "≈ 610 VNĐ"
-                              : "≈ 605 VNĐ"}
-                          )
-                        </span>
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300">
-                      AWS Free Tier
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bảng chi tiết từng dịch vụ AWS */}
-                <div className="space-y-2">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Phân rã chi phí chi tiết theo dịch vụ AWS
-                  </div>
-
-                  {item.type === "image" ? (
-                    <>
-                      <CostRow
-                        icon="👁️"
-                        service="Amazon Rekognition (Labels)"
-                        desc="Nhận diện đối tượng · DetectLabels API"
-                        cost="$0.00100"
-                      />
-                      <CostRow
-                        icon="📝"
-                        service="Amazon Rekognition (Text)"
-                        desc="Bóc tách OCR chữ bảng · DetectText API"
-                        cost="$0.00100"
-                      />
-                      <CostRow
-                        icon="⚡"
-                        service="AWS Lambda (Ingest)"
-                        desc="1024MB RAM · ~1.2s thời gian thực thi"
-                        cost="$0.00002"
-                      />
-                      <CostRow
-                        icon="🧠"
-                        service="Amazon Bedrock (Titan V2)"
-                        desc="Nhúng vector 256 chiều · ~100 tokens"
-                        cost="$0.000002"
-                      />
-                      <CostRow
-                        icon="🪣"
-                        service="Amazon S3"
-                        desc="1 PUT request + lưu trữ đối tượng"
-                        cost="$0.00005"
-                      />
-                      <CostRow
-                        icon="🗄️"
-                        service="Amazon DynamoDB"
-                        desc="1 WCU ghi bản ghi metadata"
-                        cost="$0.000001"
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <CostRow
-                        icon="🎙️"
-                        service="Amazon Transcribe"
-                        desc="Bóc băng giọng nói tiếng Việt · vi-VN model"
-                        cost="$0.02400"
-                        highlight
-                      />
-                      <CostRow
-                        icon="⚡"
-                        service="AWS Lambda (Worker)"
-                        desc="1024MB RAM · ~4.5s điều phối Transcribe"
-                        cost="$0.00007"
-                      />
-                      <CostRow
-                        icon="🧠"
-                        service="Amazon Bedrock (Titan V2)"
-                        desc="Nhúng vector 256 chiều transcript"
-                        cost="$0.000004"
-                      />
-                      <CostRow
-                        icon="🪣"
-                        service="Amazon S3"
-                        desc="Lưu trữ audio + file transcript JSON"
-                        cost="$0.00005"
-                      />
-                      <CostRow
-                        icon="🗄️"
-                        service="Amazon DynamoDB"
-                        desc="Ghi metadata + cập nhật trạng thái READY"
-                        cost="$0.000002"
-                      />
-                    </>
-                  )}
-                </div>
-
-                {/* Ghi chú Free Tier */}
-                <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 text-xs leading-relaxed text-sky-200">
-                  <div className="font-bold text-sky-300">🎁 Quyền lợi AWS Free Tier (Hàng tháng):</div>
-                  <div className="mt-1 space-y-0.5 text-slate-300">
-                    <div>• Rekognition: Miễn phí 1,000 ảnh/tháng (12 tháng đầu)</div>
-                    <div>• Transcribe: Miễn phí 60 phút audio/tháng (12 tháng đầu)</div>
-                    <div>• Lambda: Miễn phí 1,000,000 requests/tháng (Vĩnh viễn)</div>
-                    <div>• DynamoDB: Miễn phí 25 GB lưu trữ (Vĩnh viễn)</div>
-                  </div>
-                </div>
-
                 {/* Thông tin kỹ thuật tệp */}
-                <details className="group rounded-2xl border border-white/[0.06] bg-white/[0.02]">
-                  <summary className="flex cursor-pointer items-center justify-between p-3.5 text-xs font-semibold text-slate-400 hover:text-white">
-                    <span>Thông tin kỹ thuật AWS & Metadata</span>
-                    <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
-                  </summary>
-                  <div className="border-t border-white/[0.06] p-3.5 pt-2">
-                    <div className="space-y-2 font-mono text-xs">
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+                    <Database className="h-4 w-4 text-violet-400" />
+                    <span>Metadata & Định danh Tệp AWS</span>
+                  </div>
+                  <div className="space-y-2.5 font-mono text-xs">
+                    <div className="flex items-center justify-between rounded-xl surface p-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">File ID</div>
+                        <div className="truncate text-slate-200">{item.id}</div>
+                      </div>
+                      <CopyButton field="fileId" text={item.id} />
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-xl surface p-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Định dạng & Dung lượng</div>
+                        <div className="truncate text-slate-200">{item.type?.toUpperCase()} · {item.size}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-xl surface p-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Chuyên ngành & Danh mục</div>
+                        <div className="truncate text-slate-200">{item.subjectLabel || item.subject || "Chung"} · {item.categoryLabel || item.category}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl surface p-2.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pipeline Xử lý Sự kiện AWS</div>
+                      <div className="mt-1 text-xs leading-relaxed text-slate-300">
+                        {item.pipeline && item.pipeline.length > 0
+                          ? item.pipeline.join(" → ")
+                          : "S3 Uploads → SQS Ingest Queue → Lambda Ingest → AI Engine → DynamoDB Table"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl surface p-2.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Động cơ Phân tích & AI Model</div>
+                      <div className="mt-1 text-xs text-violet-300">
+                        {item.analysisSource === "amazon-nova-pro"
+                          ? "Amazon Bedrock (us.amazon.nova-pro-v1:0) & Amazon Titan V2"
+                          : item.analysisSource === "rekognition"
+                            ? "Amazon Rekognition Computer Vision & OCR"
+                            : item.analysisSource === "transcribe"
+                              ? "Amazon Transcribe Speech-to-Text vi-VN"
+                              : "Amazon Bedrock Nova Pro Multi-modal"}
+                      </div>
+                    </div>
+
+                    {item.transcript_s3_uri && (
                       <div className="flex items-center justify-between rounded-xl surface p-2.5">
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">File ID</div>
-                          <div className="truncate text-slate-200">{item.id}</div>
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Lưu trữ Toàn văn S3</div>
+                          <div className="truncate text-slate-200">{item.transcript_s3_uri}</div>
                         </div>
-                        <CopyButton field="fileId" text={item.id} />
+                        <CopyButton field="s3Uri" text={item.transcript_s3_uri} />
                       </div>
-
-                      <div className="rounded-xl surface p-2.5">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pipeline Thực thi</div>
-                        <div className="mt-1 text-xs text-slate-300">
-                          S3 uploads/ → SQS Buffer → Lambda Ingest → AI Engine → DynamoDB Table
-                        </div>
-                      </div>
-                    </div>
+                    )}
                   </div>
-                </details>
+                </div>
               </div>
             )}
           </div>
@@ -840,37 +751,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function CostRow({
-  icon,
-  service,
-  desc,
-  cost,
-  highlight = false,
-}: {
-  icon: string
-  service: string
-  desc: string
-  cost: string
-  highlight?: boolean
-}) {
-  return (
-    <div
-      className={`flex items-center justify-between rounded-xl p-2.5 transition ${
-        highlight ? "border border-sky-500/20 bg-sky-950/20" : "surface"
-      }`}
-    >
-      <div className="flex items-center gap-2.5">
-        <span className="text-base">{icon}</span>
-        <div>
-          <div className="text-xs font-bold text-slate-200">{service}</div>
-          <div className="text-[11px] text-slate-400">{desc}</div>
-        </div>
-      </div>
-      <div className="font-mono text-xs font-bold text-emerald-400">{cost}</div>
     </div>
   )
 }

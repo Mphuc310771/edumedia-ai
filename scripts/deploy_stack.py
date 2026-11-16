@@ -73,12 +73,14 @@ def _stage_pack() -> None:
     print("staged", PACK, "for SAM CodeUri")
 
 
-def _write_samconfig(api_key: str, alert_email: str = "", frontend_origin: str = "*") -> None:
+def _write_samconfig(api_key: str, alert_email: str = "", frontend_origin: str = "*", bedrock_model: str = "us.amazon.nova-pro-v1:0") -> None:
     params = [f'    "ApiKey={api_key}",']
     if alert_email:
         params.append(f'    "AlertEmail={alert_email}",')
     if frontend_origin:
         params.append(f'    "FrontendOriginUrl={frontend_origin}",')
+    if bedrock_model:
+        params.append(f'    "BedrockModelId={bedrock_model}",')
 
     SAMCONFIG.write_text(
         "\n".join(

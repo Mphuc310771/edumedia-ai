@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     METADATA_TABLE: str = Field(default="AgentSysMediaMetadata")
     TRANSCRIBE_OUTPUT_PREFIX: str = "transcripts/"
     BEDROCK_MODEL_ID: str = Field(
-        default="amazon.nova-lite-v1:0"
+        default="us.amazon.nova-pro-v1:0"
     )
     BEDROCK_REGION: Optional[str] = Field(
         default=None,
