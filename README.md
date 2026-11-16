@@ -1,4 +1,4 @@
-# Serverless Multi-Modal Agent
+# EduMedia AI — Smart Lecture Storage & Search Engine on AWS
 
 [![AWS SAM](https://img.shields.io/badge/AWS-SAM%20Serverless-orange?logo=amazon-aws)](https://aws.amazon.com/serverless/sam/)
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
@@ -14,7 +14,7 @@
 
 ## 🏛️ Architecture Overview
 
-![AgentSys Architecture](docs/agentsys-architecture.png)
+![EduMedia AI Architecture](docs/agentsys-architecture.png)
 
 The platform is designed in strict compliance with the **AWS Well-Architected Framework**, structured across 5 decoupled core zones:
 
