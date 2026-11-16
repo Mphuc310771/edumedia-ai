@@ -308,6 +308,9 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-pro-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.titan-embed-text-v2:0
                 - !Sub arn:aws:bedrock:*::foundation-model/*
                 - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*
       Events:
@@ -379,6 +382,8 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-pro-v1:0
                 - !Sub arn:aws:bedrock:*::foundation-model/*
                 - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*
             - Sid: SQSStreamDLQAccess
@@ -476,6 +481,9 @@ Resources:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
               Resource:
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-lite-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.nova-pro-v1:0
+                - !Sub arn:aws:bedrock:${BedrockRegion}::foundation-model/amazon.titan-embed-text-v2:0
                 - !Sub arn:aws:bedrock:*::foundation-model/*
                 - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*
             - Sid: CustomMetrics
