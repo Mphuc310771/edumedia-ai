@@ -1,4 +1,6 @@
-# EduMedia AI — Smart Lecture Storage & Search Engine on AWS
+# EduMedia AI
+
+Smart lecture storage and semantic search platform built on AWS Serverless and Generative AI.
 
 [![AWS SAM](https://img.shields.io/badge/AWS-SAM%20Serverless-orange?logo=amazon-aws)](https://aws.amazon.com/serverless/sam/)
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
@@ -8,162 +10,160 @@
 [![Coverage](https://img.shields.io/badge/Coverage-84%25-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-> **Event-driven multimodal media intelligence and semantic retrieval platform built on AWS Serverless, Amazon Bedrock Generative AI (Nova Lite), and 256-d Vector Embeddings.**
+---
+
+## Overview
+
+EduMedia AI helps university students organize and search through lecture materials — whiteboard captures, textbook photos, audio recordings, and video clips.
+
+Instead of manually scrolling through thousands of unorganized files in a camera roll, students can search using natural Vietnamese queries (for example: *"tìm công thức đạo hàm"* or *"bài giảng triết học phần lượng chất"*).
+
+The platform runs completely on AWS Serverless architecture:
+- Media files are stored securely in **Amazon S3** via presigned upload URLs.
+- Ingestion events are buffered in **Amazon SQS** with a Dead-Letter Queue (DLQ).
+- **Amazon Rekognition** handles image object detection and OCR.
+- **Amazon Transcribe** generates Vietnamese (`vi-VN`) speech-to-text with timestamps.
+- **Amazon Bedrock (Titan Embeddings V2 & Nova)** powers semantic query planning and 256-d vector search against metadata stored in **Amazon DynamoDB**.
 
 ---
 
-## 🏛️ Architecture Overview
+## Architecture
 
 ![EduMedia AI Architecture](docs/agentsys-architecture.png)
 
-The platform is designed in strict compliance with the **AWS Well-Architected Framework**, structured across 5 decoupled core zones:
+### Data Pipeline Workflow:
 
-1. **Client & API Gateway**: React SPA communicates over HTTPS with Amazon API Gateway (HTTP API), proxying requests to the `agentsys-api` Lambda (FastAPI).
-2. **Asynchronous Ingestion Pipeline**: Presigned direct uploads to Amazon S3 emit `s3:ObjectCreated` events buffered through Amazon SQS (`agentsys-ingest-queue`) with a Dead-Letter Queue (`agentsys-ingest-dlq`) for zero data loss.
-3. **Multimodal AI Analysis**: `agentsys-ingest` worker orchestrates **Amazon Rekognition** (labels & OCR) and **Amazon Transcribe** (`vi-VN` speech-to-text with EventBridge completion callback and DLQ isolation).
-4. **Metadata Catalog & Stream Aggregation**: Metadata is indexed in **Amazon DynamoDB** with a Global Secondary Index (`category-index`). DynamoDB Streams trigger `agentsys-aggregator` to summarize lecture chunks asynchronously via Bedrock.
-5. **Generative AI & Hybrid Search**: **Amazon Bedrock (Amazon Nova Lite)** operates as an intelligent Query Planner, while **Amazon Titan Text Embeddings V2 (256-d)** powers cosine vector similarity alongside normalized keyword overlap scoring.
+1. **Client & Ingestion**:
+   - The user requests an upload presigned URL from the FastAPI backend (running on AWS Lambda via API Gateway).
+   - The browser uploads directly to S3.
+   - S3 emits an `ObjectCreated` event to SQS (`agentsys-ingest-queue`).
+
+2. **Background Processing**:
+   - An ingest Lambda worker consumes messages in batches.
+   - For images: calls Rekognition for label detection and text OCR.
+   - For audio/video: initiates an asynchronous Transcribe job; an EventBridge rule catches job completion and writes back transcripts.
+   - Extracts semantic embeddings with Amazon Titan Text Embeddings V2 (256 dimensions).
+   - Writes structured metadata into DynamoDB with a Global Secondary Index (`category-index`).
+
+3. **Stream Aggregation**:
+   - DynamoDB Streams trigger an aggregator Lambda to summarize long lectures into topic-based chunks via Bedrock.
+
+4. **Hybrid Search**:
+   - User queries are parsed by Bedrock to extract intent, filters, and semantic keywords.
+   - Combined scoring calculates cosine vector similarity alongside keyword overlap to return the most relevant lecture timestamps and slides.
 
 ---
 
-## ☁️ Integrated AWS Services
+## Tech Stack & AWS Services
 
-| Service | Architecture Role |
+| Service / Tool | Purpose in EduMedia AI |
 | :--- | :--- |
-| **Amazon S3** | Encrypted private media storage (SSE-S3), Presigned PUT/GET URLs, and ObjectCreated event notifications. |
-| **Amazon SQS + DLQ** | Decoupled event-driven buffer (`agentsys-ingest-queue`) with Dead-Letter Queue isolation after 3 failed retries. |
-| **AWS Lambda** | Serverless compute executing FastAPI REST endpoints (`agentsys-api`), ingest worker (`agentsys-ingest`), and stream aggregator (`agentsys-aggregator`). |
-| **Amazon Rekognition** | Computer vision label classification (`DetectLabels`) and text OCR extraction (`DetectText`). |
-| **Amazon Transcribe** | Speech-to-text pipeline transcribing Vietnamese audio and video lectures (`vi-VN`) into indexed text. |
-| **Amazon EventBridge** | Event router capturing Transcribe job state transitions to invoke completion callbacks with DLQ fallback. |
-| **Amazon Bedrock** | Query planning via **Amazon Nova Lite (`amazon.nova-lite-v1:0`)** and vector embeddings via **Titan Text Embeddings V2 (`amazon.titan-embed-text-v2:0`, 256-d)**. |
-| **Amazon DynamoDB** | Pay-per-request NoSQL catalog with sub-10ms GSI queries (`category-index`) and DynamoDB Streams. |
-| **Amazon CloudWatch** | End-to-end observability: 7 automated alarms, custom metric telemetry (`MediaIngested`, `MediaQueries`), and structured logs. |
-| **Amazon SNS** | Operational alert fan-out topic (`agentsys-alerts-topic`) notifying administrators via email. |
-| **AWS IAM** | Granular least-privilege role policies scoped per Lambda function (zero long-lived credentials). |
-| **AWS SAM** | Infrastructure as Code (IaC) automating multi-service cloud provisioning via declarative templates (`infra/template.yaml`). |
+| **Amazon S3** | Private media storage with SSE-S3 encryption and presigned upload/download URLs. |
+| **Amazon SQS + DLQ** | Decoupled queue buffer between S3 and Lambda workers to prevent data loss. |
+| **AWS Lambda** | Serverless compute executing FastAPI REST endpoints, ingest workers, and stream aggregators. |
+| **Amazon DynamoDB** | Single-table NoSQL catalog with sub-10ms GSI queries (`category-index`) and DynamoDB Streams. |
+| **Amazon Rekognition** | Object and label classification (`DetectLabels`) and text OCR extraction (`DetectText`). |
+| **Amazon Transcribe** | Vietnamese speech-to-text (`vi-VN`) generating time-stamped transcripts for video/audio. |
+| **Amazon Bedrock** | Query parsing with Amazon Nova and 256-d vector embeddings with Titan Text Embeddings V2. |
+| **Amazon CloudWatch** | Automated alarms (error rates, DLQ message visible, throttling) and operational metrics. |
+| **Amazon CloudFront** | CDN distributing the React frontend SPA with edge caching. |
+| **AWS SAM** | Infrastructure as Code (IaC) declaring all AWS resources in `infra/template.yaml`. |
+| **FastAPI + React 18** | REST API backend (Python 3.12) and responsive single-page frontend (Tailwind CSS, Vite). |
 
 ---
 
-## 📂 Repository Structure
+## Project Structure
 
 ```text
 agent_sys/
-├── apps/                    # Core application source code
-│   ├── agent/               # Search agent & candidate pool retrieval
-│   ├── api/                 # FastAPI REST routes, schemas, auth & rate limiting
-│   ├── aws/                 # Boto3 AWS service wrappers & provider abstraction
-│   ├── classify/            # Rule-based heuristics & taxonomy classification
-│   ├── lambda_handlers/     # AWS Lambda entrypoints (api & ingest)
+├── apps/                    # Backend application source code
+│   ├── agent/               # Query planning & search candidate retrieval
+│   ├── api/                 # FastAPI routes, schemas, auth & rate limiting
+│   ├── aws/                 # Boto3 AWS service integrations (S3, DynamoDB, Bedrock, etc.)
+│   ├── classify/            # Taxonomy heuristics & rule-based classification
+│   ├── lambda_handlers/     # AWS Lambda entry points (API proxy & SQS ingest)
 │   ├── search/              # Vector cosine similarity & hybrid search engine
-│   └── domain.py            # Domain models, media inference & text helpers
-├── config/                  # Centralized Pydantic application settings
-├── docs/                    # Architecture diagrams and pipeline specifications
-├── gallery_web/             # React 18 SPA Frontend (Vite, TailwindCSS, Lucide Icons)
-├── infra/                   # AWS SAM Infrastructure as Code (template.yaml)
-├── pipeline/                # DynamoDB Stream Aggregator & Chunk Map-Reduce
-├── scripts/                 # Automated deployment, teardown & benchmark tooling
-├── tests/                   # Comprehensive Pytest test suite (143 passed)
-├── Dockerfile.backend       # Container image for FastAPI backend
-├── Dockerfile.frontend      # Container image for React frontend (Nginx)
-├── docker-compose.yml       # Local multi-container orchestration
-├── Makefile                 # Common engineering tasks shortcut
-└── requirements.txt         # Production & development Python dependencies
+│   └── domain.py            # Data models and helper utilities
+├── config/                  # Pydantic application settings
+├── docs/                    # Architecture diagrams & specifications
+├── gallery_web/             # React 18 SPA (Vite, Tailwind CSS, Lucide icons)
+├── infra/                   # AWS SAM template (template.yaml)
+├── pipeline/                # DynamoDB Stream aggregator & lecture chunking
+├── scripts/                 # Deployment, cleanup, and benchmark scripts
+├── tests/                   # Pytest test suite (143 unit & integration tests)
+├── docker-compose.yml       # Local development orchestration
+└── requirements.txt         # Python dependencies
 ```
 
 ---
 
-## 🚀 Quickstart & Local Development
+## Getting Started
 
-### 1. Prerequisites
+### Prerequisites
 - Python 3.12+
-- Node.js 20+ & npm
+- Node.js 20+ and npm
 - AWS CLI configured with valid credentials (or local mock environment)
 
-### 2. Manual Setup
+### Local Setup
 
-**Backend API:**
+**1. Backend (FastAPI):**
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Start FastAPI server on port 8000
+# Start API server on port 8000
 python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Frontend UI:**
+* API Docs (Swagger): `http://localhost:8000/docs`
+* Health Check: `http://localhost:8000/health`
+
+**2. Frontend (React):**
 ```bash
 cd gallery_web
 npm install
 npm run dev
 ```
 
-* **Web Application:** `http://localhost:5174`
-* **API Documentation:** `http://localhost:8000/docs`
-* **Health Check:** `http://localhost:8000/health`
+* Web App: `http://localhost:5173`
 
-### 3. Docker Compose (Alternative)
+---
+
+## Testing
+
+Run the test suite with coverage:
 
 ```bash
-docker compose up --build
+pytest tests/ -v --cov=apps --cov=pipeline --cov-fail-under=80 --cov-report=term-missing
 ```
 
+All 143 tests run against local mocks (Moto and unittest mocks) without requiring live AWS credentials.
+
 ---
 
-## 🧪 Automated Testing & Verification
+## Deployment (AWS SAM)
 
-Run the full automated test suite with Pytest:
+To deploy the entire serverless backend to AWS:
 
 ```bash
-# Execute 143 unit and integration tests with coverage reporting
-pytest tests/ -v --cov=apps --cov=pipeline --cov-report=term-missing
-```
+# Using SAM CLI
+sam build -t infra/template.yaml
+sam deploy --guided --capabilities CAPABILITY_IAM
 
----
-
-## 🛡️ Enterprise Resilience & Production Hardening
-
-AgentSys implements enterprise-grade resilience patterns designed for mission-critical AWS Serverless production:
-
-* **Public Demo Guardrails & FinOps Protection**: Demo lecture assets are protected with `is_demo_protected: true` (deletion attempts return `HTTP 403 Forbidden` unless authorized with `x-admin-force: true`). Public media uploads are strictly capped at $\le$ 25MB (`HTTP 413 Payload Too Large`), and file MIME types are restricted exclusively to image, audio, and video formats.
-* **Interactive Media Experience**: Web frontend features a Click-to-Seek player syncing transcript timestamps directly to audio/video playback and lexical keyword highlighting.
-* **DynamoDB 400KB Item Guard (S3 Offloading)**: Long audio/video transcripts exceeding 250KB are automatically offloaded to Amazon S3 (`transcripts/raw/{file_id}.json`). A 15,000-character preview snippet and pointer (`transcript_s3_uri`, `has_extended_transcript: true`) are persisted in DynamoDB, eliminating the risk of `ValidationException: Item size has exceeded the maximum allowed size of 400KB`.
-* **Lambda Warm-Container Boto3 Reuse**: Connection pools and TLS handshakes are preserved across warm Lambda container invocations, avoiding 50–120ms cold re-connection overhead on every SQS message or API query.
-* **Two-Tier LRU Query Cache (`_PLAN_CACHE`)**: In-memory caching for Bedrock query plans caches validated plans for 1 hour with LRU eviction (max 256 entries), speeding up repeated Vietnamese search requests by **~3.7x** (from ~3,194 ms down to ~855 ms) and eliminating 100% of redundant LLM token costs.
-* **DDoS & Burst Rate Limiting**: SlowAPI limits burst traffic to 20 queries/minute per client IP (resolving client IPs through `X-Forwarded-For` reverse proxy headers) to protect downstream Bedrock quotas from budget exhaustion.
-* **Concurrent Stress Benchmark Suite**: An in-tree load generator validates system latency and rate limit enforcement under 50 concurrent workers:
-  ```bash
-  python scripts/stress_benchmark.py -c 50
-  ```
-
----
-
-## 🚢 Cloud Deployment (AWS SAM)
-
-### Automated Deploy (Recommended):
-```bash
+# Or using the automated deploy script
 python scripts/deploy_stack.py
 ```
 
-### Manual SAM CLI Deploy:
+### Resource Cleanup
+To delete deployed cloud resources and prevent ongoing costs:
 ```bash
-# 1. Build serverless artifacts
-sam build -t infra/template.yaml
-
-# 2. Deploy to AWS
-sam deploy --guided --capabilities CAPABILITY_IAM
-```
-
-### Resource Teardown:
-```bash
-# Clean up all deployed resources in reverse dependency order
-chmod +x scripts/cleanup.sh
 ./scripts/cleanup.sh us-east-1 agentsys
 ```
 
 ---
 
-## 👨‍💻 Author & Program
-* **Author:** Đỗ Trần Minh Phúc (HCMUS — VNU-HCM)
-* **Program:** First Cloud AI Journey (FCAJ) — AWS Vietnam
-* **Workload:** Serverless Multi-Modal Media Catalog & Intelligent Semantic Search
+## Author
+
+- **Author:** Đỗ Trần Minh Phúc (Do Tran Minh Phuc)
+- **University:** HCMUS — VNU-HCM (Trường Đại học Khoa học Tự nhiên, ĐHQG-HCM)
+- **Program:** AWS First Cloud AI Journey (FCAJ) Vietnam 2026
