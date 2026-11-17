@@ -108,6 +108,9 @@ agent_sys/
 
 **1. Backend (FastAPI):**
 ```bash
+# Configure local environment variables
+cp .env.example .env
+
 # Install dependencies
 pip install -r requirements.txt
 
@@ -125,7 +128,7 @@ npm install
 npm run dev
 ```
 
-* Web App: `http://localhost:5173`
+* Web App: `http://localhost:5174`
 
 ---
 
@@ -146,17 +149,18 @@ All 143 tests run against local mocks (Moto and unittest mocks) without requirin
 To deploy the entire serverless backend to AWS:
 
 ```bash
-# Using SAM CLI
+# Automated build & deploy (stages runtime packaging and triggers SAM)
+python scripts/deploy_stack.py
+
+# Manual SAM CLI deploy alternative
 sam build -t infra/template.yaml
 sam deploy --guided --capabilities CAPABILITY_IAM
-
-# Or using the automated deploy script
-python scripts/deploy_stack.py
 ```
 
 ### Resource Cleanup
 To delete deployed cloud resources and prevent ongoing costs:
 ```bash
+chmod +x scripts/cleanup.sh
 ./scripts/cleanup.sh us-east-1 agentsys
 ```
 
@@ -164,6 +168,4 @@ To delete deployed cloud resources and prevent ongoing costs:
 
 ## Author
 
-- **Author:** Đỗ Trần Minh Phúc (Do Tran Minh Phuc)
-- **University:** HCMUS — VNU-HCM (Trường Đại học Khoa học Tự nhiên, ĐHQG-HCM)
-- **Program:** AWS First Cloud AI Journey (FCAJ) Vietnam 2026
+- **Author:** Do Tran Minh Phuc
