@@ -75,7 +75,7 @@ The platform runs completely on AWS Serverless architecture:
 ## Project Structure
 
 ```text
-agent_sys/
+edumedia-ai/
 ├── apps/                    # Backend application source code
 │   ├── agent/               # Query planning & search candidate retrieval
 │   ├── api/                 # FastAPI routes, schemas, auth & rate limiting
